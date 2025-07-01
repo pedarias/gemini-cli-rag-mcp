@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  gemini-cli-mcp:
+    build: .
+    container_name: gemini-cli-mcp-container
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      # Mount the vector store data to persist across container restarts
+      - ./gemini_cli_vectorstore.parquet:/app/gemini_cli_vectorstore.parquet:ro
+      - ./gemini_cli_docs.txt:/app/gemini_cli_docs.txt:ro
+    stdin_open: true
+    tty: true
+    # For MCP stdio communication, we need to keep the container running
+    # and handle I/O through docker exec
+    command: ["tail", "-f", "/dev/null"]
+    restart: unless-stopped

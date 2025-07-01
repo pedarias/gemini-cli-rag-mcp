@@ -1,0 +1,3229 @@
+
+
+--- Content from: gemini-cli/docs/troubleshooting.md ---
+
+# Troubleshooting Guide
+
+This guide provides solutions to common issues and debugging tips.
+
+## Authentication
+
+- **Error: `Failed to login. Message: Request contains an invalid argument`**
+  - Users with Google Workspace accounts, or users with Google Cloud accounts
+    associated with their Gmail accounts may not be able to activate the free
+    tier of the Google Code Assist plan.
+  - For Google Cloud accounts, you can work around this by setting
+    `GOOGLE_CLOUD_PROJECT` to your project ID.
+  - You can also grab an API key from [AI
+    Studio](http://aistudio.google.com/app/apikey), which also includes a
+    separate free tier.
+
+## Frequently asked questions (FAQs)
+
+- **Q: How do I update Gemini CLI to the latest version?**
+  - A: If installed globally via npm, update Gemini CLI using the command `npm install -g @google/gemini-cli@latest`. If run from source, pull the latest changes from the repository and rebuild using `npm run build`.
+
+- **Q: Where are Gemini CLI configuration files stored?**
+  - A: The CLI configuration is stored within two `settings.json` files: one in your home directory and one in your project's root directory. In both locations, `settings.json` is found in the `.gemini/` folder. Refer to [CLI Configuration](./cli/configuration.md) for more details.
+
+- **Q: Why don't I see cached token counts in my stats output?**
+  - A: Cached token information is only displayed when cached tokens are being used. This feature is available for API key users (Gemini API key or Vertex AI) but not for OAuth users (Google Personal/Enterprise accounts) at this time, as the Code Assist API does not support cached content creation. You can still view your total token usage with the `/stats` command.
+
+## Common error messages and solutions
+
+- **Error: `EADDRINUSE` (Address already in use) when starting an MCP server.**
+  - **Cause:** Another process is already using the port the MCP server is trying to bind to.
+  - **Solution:**
+    Either stop the other process that is using the port or configure the MCP server to use a different port.
+
+- **Error: Command not found (when attempting to run Gemini CLI).**
+  - **Cause:** Gemini CLI is not correctly installed or not in your system's PATH.
+  - **Solution:**
+    1.  Ensure Gemini CLI installation was successful.
+    2.  If installed globally, check that your npm global binary directory is in your PATH.
+    3.  If running from source, ensure you are using the correct command to invoke it (e.g., `node packages/cli/dist/index.js ...`).
+
+- **Error: `MODULE_NOT_FOUND` or import errors.**
+  - **Cause:** Dependencies are not installed correctly, or the project hasn't been built.
+  - **Solution:**
+    1.  Run `npm install` to ensure all dependencies are present.
+    2.  Run `npm run build` to compile the project.
+
+- **Error: "Operation not permitted", "Permission denied", or similar.**
+  - **Cause:** If sandboxing is enabled, then the application is likely attempting an operation restricted by your sandbox, such as writing outside the project directory or system temp directory.
+  - **Solution:** See [Sandboxing](./cli/configuration.md#sandboxing) for more information, including how to customize your sandbox configuration.
+
+- **CLI is not interactive in "CI" environments**
+  - **Issue:** The CLI does not enter interactive mode (no prompt appears) if an environment variable starting with `CI_` (e.g., `CI_TOKEN`) is set. This is because the `is-in-ci` package, used by the underlying UI framework, detects these variables and assumes a non-interactive CI environment.
+  - **Cause:** The `is-in-ci` package checks for the presence of `CI`, `CONTINUOUS_INTEGRATION`, or any environment variable with a `CI_` prefix. When any of these are found, it signals that the environment is non-interactive, which prevents the CLI from starting in its interactive mode.
+  - **Solution:**: If the `CI_` prefixed variable is not needed for the CLI to function, you can temporarily unset it for the command. e.g., `env -u CI_TOKEN gemini`
+
+## Debugging Tips
+
+- **CLI debugging:**
+  - Use the `--verbose` flag (if available) with CLI commands for more detailed output.
+  - Check the CLI logs, often found in a user-specific configuration or cache directory.
+
+- **Core debugging:**
+  - Check the server console output for error messages or stack traces.
+  - Increase log verbosity if configurable.
+  - Use Node.js debugging tools (e.g., `node --inspect`) if you need to step through server-side code.
+
+- **Tool issues:**
+  - If a specific tool is failing, try to isolate the issue by running the simplest possible version of the command or operation the tool performs.
+  - For `run_shell_command`, check that the command works directly in your shell first.
+  - For file system tools, double-check paths and permissions.
+
+- **Pre-flight checks:**
+  - Always run `npm run preflight` before committing code. This can catch many common issues related to formatting, linting, and type errors.
+
+If you encounter an issue not covered here, consider searching the project's issue tracker on GitHub or reporting a new issue with detailed information.
+
+
+--- Content from: gemini-cli/docs/checkpointing.md ---
+
+# Checkpointing
+
+The Gemini CLI includes a Checkpointing feature that automatically saves a snapshot of your project's state before any file modifications are made by AI-powered tools. This allows you to safely experiment with and apply code changes, knowing you can instantly revert back to the state before the tool was run.
+
+## How It Works
+
+When you approve a tool that modifies the file system (like `write_file` or `replace`), the CLI automatically creates a "checkpoint." This checkpoint includes:
+
+1.  **A Git Snapshot:** A commit is made in a special, shadow Git repository located in your home directory (`~/.gemini/history/<project_hash>`). This snapshot captures the complete state of your project files at that moment. It does **not** interfere with your own project's Git repository.
+2.  **Conversation History:** The entire conversation you've had with the agent up to that point is saved.
+3.  **The Tool Call:** The specific tool call that was about to be executed is also stored.
+
+If you want to undo the change or simply go back, you can use the `/restore` command. Restoring a checkpoint will:
+
+- Revert all files in your project to the state captured in the snapshot.
+- Restore the conversation history in the CLI.
+- Re-propose the original tool call, allowing you to run it again, modify it, or simply ignore it.
+
+All checkpoint data, including the Git snapshot and conversation history, is stored locally on your machine. The Git snapshot is stored in the shadow repository while the conversation history and tool calls are saved in a JSON file in your project's temporary directory, typically located at `~/.gemini/tmp/<project_hash>/checkpoints`.
+
+## Enabling the Feature
+
+The Checkpointing feature is disabled by default. To enable it, you can either use a command-line flag or edit your `settings.json` file.
+
+### Using the Command-Line Flag
+
+You can enable checkpointing for the current session by using the `--checkpointing` flag when starting the Gemini CLI:
+
+```bash
+gemini --checkpointing
+```
+
+### Using the `settings.json` File
+
+To enable checkpointing by default for all sessions, you need to edit your `settings.json` file.
+
+Add the following key to your `settings.json`:
+
+```json
+{
+  "checkpointing": {
+    "enabled": true
+  }
+}
+```
+
+## Using the `/restore` Command
+
+Once enabled, checkpoints are created automatically. To manage them, you use the `/restore` command.
+
+### List Available Checkpoints
+
+To see a list of all saved checkpoints for the current project, simply run:
+
+```
+/restore
+```
+
+The CLI will display a list of available checkpoint files. These file names are typically composed of a timestamp, the name of the file being modified, and the name of the tool that was about to be run (e.g., `2025-06-22T10-00-00_000Z-my-file.txt-write_file`).
+
+### Restore a Specific Checkpoint
+
+To restore your project to a specific checkpoint, use the checkpoint file from the list:
+
+```
+/restore <checkpoint_file>
+```
+
+For example:
+
+```
+/restore 2025-06-22T10-00-00_000Z-my-file.txt-write_file
+```
+
+After running the command, your files and conversation will be immediately restored to the state they were in when the checkpoint was created, and the original tool prompt will reappear.
+
+
+--- Content from: gemini-cli/docs/deployment.md ---
+
+# Gemini CLI Execution and Deployment
+
+This document describes how to run Gemini CLI and explains the deployment architecture that Gemini CLI uses.
+
+## Running Gemini CLI
+
+There are several ways to run Gemini CLI. The option you choose depends on how you intend to use Gemini CLI.
+
+---
+
+### 1. Standard installation (Recommended for typical users)
+
+This is the recommended way for end-users to install Gemini CLI. It involves downloading the Gemini CLI package from the NPM registry.
+
+- **Global install:**
+
+  ```bash
+  # Install the CLI globally
+  npm install -g @google/gemini-cli
+
+  # Now you can run the CLI from anywhere
+  gemini
+  ```
+
+- **NPX execution:**
+  ```bash
+  # Execute the latest version from NPM without a global install
+  npx @google/gemini-cli
+  ```
+
+---
+
+### 2. Running in a sandbox (Docker/Podman)
+
+For security and isolation, Gemini CLI can be run inside a container. This is the default way that the CLI executes tools that might have side effects.
+
+- **Directly from the Registry:**
+  You can run the published sandbox image directly. This is useful for environments where you only have Docker and want to run the CLI.
+  ```bash
+  # Run the published sandbox image
+  docker run --rm -it us-docker.pkg.dev/gemini-code-dev/gemini-cli/sandbox:0.1.1
+  ```
+- **Using the `--sandbox` flag:**
+  If you have Gemini CLI installed locally (using the standard installation described above), you can instruct it to run inside the sandbox container.
+  ```bash
+  gemini --sandbox "your prompt here"
+  ```
+
+---
+
+### 3. Running from source (Recommended for Gemini CLI contributors)
+
+Contributors to the project will want to run the CLI directly from the source code.
+
+- **Development Mode:**
+  This method provides hot-reloading and is useful for active development.
+  ```bash
+  # From the root of the repository
+  npm run start
+  ```
+- **Production-like mode (Linked package):**
+  This method simulates a global installation by linking your local package. It's useful for testing a local build in a production workflow.
+
+  ```bash
+  # Link the local cli package to your global node_modules
+  npm link packages/cli
+
+  # Now you can run your local version using the `gemini` command
+  gemini
+  ```
+
+---
+
+### 4. Running the latest Gemini CLI commit from GitHub
+
+You can run the most recently committed version of Gemini CLI directly from the GitHub repository. This is useful for testing features still in development.
+
+```bash
+# Execute the CLI directly from the main branch on GitHub
+npx https://github.com/google-gemini/gemini-cli
+```
+
+## Deployment architecture
+
+The execution methods described above are made possible by the following architectural components and processes:
+
+**NPM packages**
+
+Gemini CLI project is a monorepo that publishes two core packages to the NPM registry:
+
+- `@google/gemini-cli-core`: The backend, handling logic and tool execution.
+- `@google/gemini-cli`: The user-facing frontend.
+
+These packages are used when performing the standard installation and when running Gemini CLI from the source.
+
+**Build and packaging processes**
+
+There are two distinct build processes used, depending on the distribution channel:
+
+- **NPM publication:** For publishing to the NPM registry, the TypeScript source code in `@google/gemini-cli-core` and `@google/gemini-cli` is transpiled into standard JavaScript using the TypeScript Compiler (`tsc`). The resulting `dist/` directory is what gets published in the NPM package. This is a standard approach for TypeScript libraries.
+
+- **GitHub `npx` execution:** When running the latest version of Gemini CLI directly from GitHub, a different process is triggered by the `prepare` script in `package.json`. This script uses `esbuild` to bundle the entire application and its dependencies into a single, self-contained JavaScript file. This bundle is created on-the-fly on the user's machine and is not checked into the repository.
+
+**Docker sandbox image**
+
+The Docker-based execution method is supported by the `gemini-cli-sandbox` container image. This image is published to a container registry and contains a pre-installed, global version of Gemini CLI. The `scripts/prepare-cli-packagejson.js` script dynamically injects the URI of this image into the CLI's `package.json` before publishing, so the CLI knows which image to pull when the `--sandbox` flag is used.
+
+## Release process
+
+A unified script, `npm run publish:release`, orchestrates the release process. The script performs the following actions:
+
+1.  Build the NPM packages using `tsc`.
+2.  Update the CLI's `package.json` with the Docker image URI.
+3.  Build and tag the `gemini-cli-sandbox` Docker image.
+4.  Push the Docker image to the container registry.
+5.  Publish the NPM packages to the artifact registry.
+
+
+--- Content from: gemini-cli/docs/telemetry.md ---
+
+# Gemini CLI Observability Guide
+
+Telemetry provides data about Gemini CLI's performance, health, and usage. By enabling it, you can monitor operations, debug issues, and optimize tool usage through traces, metrics, and structured logs.
+
+Gemini CLI's telemetry system is built on the **[OpenTelemetry] (OTEL)** standard, allowing you to send data to any compatible backend.
+
+[OpenTelemetry]: https://opentelemetry.io/
+
+## Enabling telemetry
+
+You can enable telemetry in multiple ways. Configuration is primarily managed via the [`.gemini/settings.json` file](./cli/configuration.md) and environment variables, but CLI flags can override these settings for a specific session.
+
+### Order of precedence
+
+The following lists the precedence for applying telemetry settings, with items listed higher having greater precedence:
+
+1.  **CLI flags (for `gemini` command):**
+    - `--telemetry` / `--no-telemetry`: Overrides `telemetry.enabled`.
+    - `--telemetry-target <local|gcp>`: Overrides `telemetry.target`.
+    - `--telemetry-otlp-endpoint <URL>`: Overrides `telemetry.otlpEndpoint`.
+    - `--telemetry-log-prompts` / `--no-telemetry-log-prompts`: Overrides `telemetry.logPrompts`.
+
+1.  **Environment variables:**
+    - `OTEL_EXPORTER_OTLP_ENDPOINT`: Overrides `telemetry.otlpEndpoint`.
+
+1.  **Workspace settings file (`.gemini/settings.json`):** Values from the `telemetry` object in this project-specific file.
+
+1.  **User settings file (`~/.gemini/settings.json`):** Values from the `telemetry` object in this global user file.
+
+1.  **Defaults:** applied if not set by any of the above.
+    - `telemetry.enabled`: `false`
+    - `telemetry.target`: `local`
+    - `telemetry.otlpEndpoint`: `http://localhost:4317`
+    - `telemetry.logPrompts`: `true`
+
+**For the `npm run telemetry -- --target=<gcp|local>` script:**
+The `--target` argument to this script _only_ overrides the `telemetry.target` for the duration and purpose of that script (i.e., choosing which collector to start). It does not permanently change your `settings.json`. The script will first look at `settings.json` for a `telemetry.target` to use as its default.
+
+### Example settings
+
+The following code can be added to your workspace (`.gemini/settings.json`) or user (`~/.gemini/settings.json`) settings to enable telemetry and send the output to Google Cloud:
+
+```json
+{
+  "telemetry": {
+    "enabled": true,
+    "target": "gcp"
+  },
+  "sandbox": false
+}
+```
+
+## Running an OTEL Collector
+
+An OTEL Collector is a service that receives, processes, and exports telemetry data.
+The CLI sends data using the OTLP/gRPC protocol.
+
+Learn more about OTEL exporter standard configuration in [documentation][otel-config-docs].
+
+[otel-config-docs]: https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/
+
+### Local
+
+Use the `npm run telemetry -- --target=local` command to automate the process of setting up a local telemetry pipeline, including configuring the necessary settings in your `.gemini/settings.json` file. The underlying script installs `otelcol-contrib` (the OpenTelemetry Collector) and `jaeger` (The Jaeger UI for viewing traces). To use it:
+
+1.  **Run the command**:
+    Execute the command from the root of the repository:
+
+    ```bash
+    npm run telemetry -- --target=local
+    ```
+
+    The script will:
+    - Download Jaeger and OTEL if needed.
+    - Start a local Jaeger instance.
+    - Start an OTEL collector configured to receive data from Gemini CLI.
+    - Automatically enable telemetry in your workspace settings.
+    - On exit, disable telemetry.
+
+1.  **View traces**:
+    Open your web browser and navigate to **http://localhost:16686** to access the Jaeger UI. Here you can inspect detailed traces of Gemini CLI operations.
+
+1.  **Inspect logs and metrics**:
+    The script redirects the OTEL collector output (which includes logs and metrics) to `~/.gemini/tmp/<projectHash>/otel/collector.log`. The script will provide links to view and a command to tail your telemetry data (traces, metrics, logs) locally.
+
+1.  **Stop the services**:
+    Press `Ctrl+C` in the terminal where the script is running to stop the OTEL Collector and Jaeger services.
+
+### Google Cloud
+
+Use the `npm run telemetry -- --target=gcp` command to automate setting up a local OpenTelemetry collector that forwards data to your Google Cloud project, including configuring the necessary settings in your `.gemini/settings.json` file. The underlying script installs `otelcol-contrib`. To use it:
+
+1.  **Prerequisites**:
+    - Have a Google Cloud project ID.
+    - Export the `GOOGLE_CLOUD_PROJECT` environment variable to make it available to the OTEL collector.
+      ```bash
+      export OTLP_GOOGLE_CLOUD_PROJECT="your-project-id"
+      ```
+    - Authenticate with Google Cloud (e.g., run `gcloud auth application-default login` or ensure `GOOGLE_APPLICATION_CREDENTIALS` is set).
+    - Ensure your Google Cloud account/service account has the necessary IAM roles: "Cloud Trace Agent", "Monitoring Metric Writer", and "Logs Writer".
+
+1.  **Run the command**:
+    Execute the command from the root of the repository:
+
+    ```bash
+    npm run telemetry -- --target=gcp
+    ```
+
+    The script will:
+    - Download the `otelcol-contrib` binary if needed.
+    - Start an OTEL collector configured to receive data from Gemini CLI and export it to your specified Google Cloud project.
+    - Automatically enable telemetry and disable sandbox mode in your workspace settings (`.gemini/settings.json`).
+    - Provide direct links to view traces, metrics, and logs in your Google Cloud Console.
+    - On exit (Ctrl+C), it will attempt to restore your original telemetry and sandbox settings.
+
+1.  **Run Gemini CLI:**
+    In a separate terminal, run your Gemini CLI commands. This generates telemetry data that the collector captures.
+
+1.  **View telemetry in Google Cloud**:
+    Use the links provided by the script to navigate to the Google Cloud Console and view your traces, metrics, and logs.
+
+1.  **Inspect local collector logs**:
+    The script redirects the local OTEL collector output to `~/.gemini/tmp/<projectHash>/otel/collector-gcp.log`. The script provides links to view and command to tail your collector logs locally.
+
+1.  **Stop the service**:
+    Press `Ctrl+C` in the terminal where the script is running to stop the OTEL Collector.
+
+## Logs and metric reference
+
+The following section describes the structure of logs and metrics generated for Gemini CLI.
+
+- A `sessionId` is included as a common attribute on all logs and metrics.
+
+### Logs
+
+Logs are timestamped records of specific events. The following events are logged for Gemini CLI:
+
+- `gemini_cli.config`: This event occurs once at startup with the CLI's configuration.
+  - **Attributes**:
+    - `model` (string)
+    - `embedding_model` (string)
+    - `sandbox_enabled` (boolean)
+    - `core_tools_enabled` (string)
+    - `approval_mode` (string)
+    - `api_key_enabled` (boolean)
+    - `vertex_ai_enabled` (boolean)
+    - `code_assist_enabled` (boolean)
+    - `log_prompts_enabled` (boolean)
+    - `file_filtering_respect_git_ignore` (boolean)
+    - `debug_mode` (boolean)
+    - `mcp_servers` (string)
+
+- `gemini_cli.user_prompt`: This event occurs when a user submits a prompt.
+  - **Attributes**:
+    - `prompt_length`
+    - `prompt` (this attribute is excluded if `log_prompts_enabled` is configured to be `false`)
+
+- `gemini_cli.tool_call`: This event occurs for each function call.
+  - **Attributes**:
+    - `function_name`
+    - `function_args`
+    - `duration_ms`
+    - `success` (boolean)
+    - `decision` (string: "accept", "reject", or "modify", if applicable)
+    - `error` (if applicable)
+    - `error_type` (if applicable)
+
+- `gemini_cli.api_request`: This event occurs when making a request to Gemini API.
+  - **Attributes**:
+    - `model`
+    - `request_text` (if applicable)
+
+- `gemini_cli.api_error`: This event occurs if the API request fails.
+  - **Attributes**:
+    - `model`
+    - `error`
+    - `error_type`
+    - `status_code`
+    - `duration_ms`
+
+- `gemini_cli.api_response`: This event occurs upon receiving a response from Gemini API.
+  - **Attributes**:
+    - `model`
+    - `status_code`
+    - `duration_ms`
+    - `error` (optional)
+    - `input_token_count`
+    - `output_token_count`
+    - `cached_content_token_count`
+    - `thoughts_token_count`
+    - `tool_token_count`
+    - `response_text` (if applicable)
+
+### Metrics
+
+Metrics are numerical measurements of behavior over time. The following metrics are collected for Gemini CLI:
+
+- `gemini_cli.session.count` (Counter, Int): Incremented once per CLI startup.
+
+- `gemini_cli.tool.call.count` (Counter, Int): Counts tool calls.
+  - **Attributes**:
+    - `function_name`
+    - `success` (boolean)
+    - `decision` (string: "accept", "reject", or "modify", if applicable)
+
+- `gemini_cli.tool.call.latency` (Histogram, ms): Measures tool call latency.
+  - **Attributes**:
+    - `function_name`
+    - `decision` (string: "accept", "reject", or "modify", if applicable)
+
+- `gemini_cli.api.request.count` (Counter, Int): Counts all API requests.
+  - **Attributes**:
+    - `model`
+    - `status_code`
+    - `error_type` (if applicable)
+
+- `gemini_cli.api.request.latency` (Histogram, ms): Measures API request latency.
+  - **Attributes**:
+    - `model`
+
+- `gemini_cli.token.usage` (Counter, Int): Counts the number of tokens used.
+  - **Attributes**:
+    - `model`
+    - `type` (string: "input", "output", "thought", "cache", or "tool")
+
+- `gemini_cli.file.operation.count` (Counter, Int): Counts file operations.
+  - **Attributes**:
+    - `operation` (string: "create", "read", "update"): The type of file operation.
+    - `lines` (Int, if applicable): Number of lines in the file.
+    - `mimetype` (string, if applicable): Mimetype of the file.
+    - `extension` (string, if applicable): File extension of the file.
+
+
+--- Content from: gemini-cli/docs/index.md ---
+
+# Welcome to Gemini CLI documentation
+
+This documentation provides a comprehensive guide to installing, using, and developing Gemini CLI. This tool lets you interact with Gemini models through a command-line interface.
+
+## Overview
+
+Gemini CLI brings the capabilities of Gemini models to your terminal in an interactive Read-Eval-Print Loop (REPL) environment. Gemini CLI consists of a client-side application (`packages/cli`) that communicates with a local server (`packages/core`), which in turn manages requests to the Gemini API and its AI models. Gemini CLI also contains a variety of tools for tasks such as performing file system operations, running shells, and web fetching, which are managed by `packages/core`.
+
+## Navigating the documentation
+
+This documentation is organized into the following sections:
+
+- **[Execution and Deployment](./deployment.md):** Information for running Gemini CLI.
+- **[Architecture Overview](./architecture.md):** Understand the high-level design of Gemini CLI, including its components and how they interact.
+- **CLI Usage:** Documentation for `packages/cli`.
+  - **[CLI Introduction](./cli/index.md):** Overview of the command-line interface.
+  - **[Commands](./cli/commands.md):** Description of available CLI commands.
+  - **[Configuration](./cli/configuration.md):** Information on configuring the CLI.
+  - **[Checkpointing](./checkpointing.md):** Documentation for the checkpointing feature.
+  - **[Extensions](./extension.md):** How to extend the CLI with new functionality.
+  - **[Telemetry](./telemetry.md):** Overview of telemetry in the CLI.
+- **Core Details:** Documentation for `packages/core`.
+  - **[Core Introduction](./core/index.md):** Overview of the core component.
+  - **[Tools API](./core/tools-api.md):** Information on how the core manages and exposes tools.
+- **Tools:**
+  - **[Tools Overview](./tools/index.md):** Overview of the available tools.
+  - **[File System Tools](./tools/file-system.md):** Documentation for the `read_file` and `write_file` tools.
+  - **[Multi-File Read Tool](./tools/multi-file.md):** Documentation for the `read_many_files` tool.
+  - **[Shell Tool](./tools/shell.md):** Documentation for the `run_shell_command` tool.
+  - **[Web Fetch Tool](./tools/web-fetch.md):** Documentation for the `web_fetch` tool.
+  - **[Web Search Tool](./tools/web-search.md):** Documentation for the `google_web_search` tool.
+  - **[Memory Tool](./tools/memory.md):** Documentation for the `save_memory` tool.
+- **[Contributing & Development Guide](../CONTRIBUTING.md):** Information for contributors and developers, including setup, building, testing, and coding conventions.
+- **[Troubleshooting Guide](./troubleshooting.md):** Find solutions to common problems and FAQs.
+- **[Terms of Service and Privacy Notice](./tos-privacy.md):** Information on the terms of service and privacy notices applicable to your use of Gemini CLI.
+
+We hope this documentation helps you make the most of the Gemini CLI!
+
+
+--- Content from: gemini-cli/docs/sandbox.md ---
+
+# Sandboxing in the Gemini CLI
+
+This document provides a guide to sandboxing in the Gemini CLI, including prerequisites, quickstart, and configuration.
+
+## Prerequisites
+
+Before using sandboxing, you need to install and set up the Gemini CLI:
+
+```bash
+# install gemini-cli with npm
+npm install -g @google/gemini-cli
+
+# Verify installation
+gemini --version
+```
+
+## Overview of sandboxing
+
+Sandboxing isolates potentially dangerous operations (such as shell commands or file modifications) from your host system, providing a security barrier between AI operations and your environment.
+
+The benefits of sandboxing include:
+
+- **Security**: Prevent accidental system damage or data loss.
+- **Isolation**: Limit file system access to project directory.
+- **Consistency**: Ensure reproducible environments across different systems.
+- **Safety**: Reduce risk when working with untrusted code or experimental commands.
+
+## Sandboxing methods
+
+Your ideal method of sandboxing may differ depending on your platform and your preferred container solution.
+
+### 1. macOS Seatbelt (macOS only)
+
+Lightweight, built-in sandboxing using `sandbox-exec`.
+
+**Default profile**: `permissive-open` - restricts writes outside project directory but allows most other operations.
+
+### 2. Container-based (Docker/Podman)
+
+Cross-platform sandboxing with complete process isolation.
+
+**Note**: Requires building the sandbox image locally or using a published image from your organization's registry.
+
+## Quickstart
+
+```bash
+# Enable sandboxing with command flag
+gemini -s -p "analyze the code structure"
+
+# Use environment variable
+export GEMINI_SANDBOX=true
+gemini -p "run the test suite"
+
+# Configure in settings.json
+{
+  "sandbox": "docker"
+}
+```
+
+## Configuration
+
+### Enable sandboxing (in order of precedence)
+
+1. **Command flag**: `-s` or `--sandbox`
+2. **Environment variable**: `GEMINI_SANDBOX=true|docker|podman|sandbox-exec`
+3. **Settings file**: `"sandbox": true` in `settings.json`
+
+### macOS Seatbelt profiles
+
+Built-in profiles (set via `SEATBELT_PROFILE` env var):
+
+- `permissive-open` (default): Write restrictions, network allowed
+- `permissive-closed`: Write restrictions, no network
+- `permissive-proxied`: Write restrictions, network via proxy
+- `restrictive-open`: Strict restrictions, network allowed
+- `restrictive-closed`: Maximum restrictions
+
+## Linux UID/GID handling
+
+The sandbox automatically handles user permissions on Linux. Override these permissions with:
+
+```bash
+export SANDBOX_SET_UID_GID=true   # Force host UID/GID
+export SANDBOX_SET_UID_GID=false  # Disable UID/GID mapping
+```
+
+## Troubleshooting
+
+### Common issues
+
+**"Operation not permitted"**
+
+- Operation requires access outside sandbox.
+- Try more permissive profile or add mount points.
+
+**Missing commands**
+
+- Add to custom Dockerfile.
+- Install via `sandbox.bashrc`.
+
+**Network issues**
+
+- Check sandbox profile allows network.
+- Verify proxy configuration.
+
+### Debug mode
+
+```bash
+DEBUG=1 gemini -s -p "debug command"
+```
+
+### Inspect sandbox
+
+```bash
+# Check environment
+gemini -s -p "run shell command: env | grep SANDBOX"
+
+# List mounts
+gemini -s -p "run shell command: mount | grep workspace"
+```
+
+## Security notes
+
+- Sandboxing reduces but doesn't eliminate all risks.
+- Use the most restrictive profile that allows your work.
+- Container overhead is minimal after first build.
+- GUI applications may not work in sandboxes.
+
+## Related documentation
+
+- [Configuration](./cli/configuration.md): Full configuration options.
+- [Commands](./cli/commands.md): Available commands.
+- [Troubleshooting](./troubleshooting.md): General troubleshooting.
+
+
+--- Content from: gemini-cli/docs/extension.md ---
+
+# Gemini CLI Extensions
+
+Gemini CLI supports extensions that can be used to configure and extend its functionality.
+
+## How it works
+
+On startup, Gemini CLI looks for extensions in two locations:
+
+1.  `<workspace>/.gemini/extensions`
+2.  `<home>/.gemini/extensions`
+
+Gemini CLI loads all extensions from both locations. If an extension with the same name exists in both locations, the extension in the workspace directory takes precedence.
+
+Within each location, individual extensions exist as a directory that contains a `gemini-extension.json` file. For example:
+
+`<workspace>/.gemini/extensions/my-extension/gemini-extension.json`
+
+### `gemini-extension.json`
+
+The `gemini-extension.json` file contains the configuration for the extension. The file has the following structure:
+
+```json
+{
+  "name": "my-extension",
+  "version": "1.0.0",
+  "mcpServers": {
+    "my-server": {
+      "command": "node my-server.js"
+    }
+  },
+  "contextFileName": "GEMINI.md"
+}
+```
+
+- `name`: The name of the extension. This is used to uniquely identify the extension. This should match the name of your extension directory.
+- `version`: The version of the extension.
+- `mcpServers`: A map of MCP servers to configure. The key is the name of the server, and the value is the server configuration. These servers will be loaded on startup just like MCP servers configured in a [`settings.json` file](./cli/configuration.md). If both an extension and a `settings.json` file configure an MCP server with the same name, the server defined in the `settings.json` file takes precedence.
+- `contextFileName`: The name of the file that contains the context for the extension. This will be used to load the context from the workspace. If this property is not used but a `GEMINI.md` file is present in your extension directory, then that file will be loaded.
+
+When Gemini CLI starts, it loads all the extensions and merges their configurations. If there are any conflicts, the workspace configuration takes precedence.
+
+
+--- Content from: gemini-cli/docs/Uninstall.md ---
+
+## Uninstalling the CLI
+
+Your uninstall method depends on how you ran the CLI. Follow the instructions for either npx or a global npm installation.
+
+### Method 1: Using npx
+
+npx runs packages from a temporary cache without a permanent installation. To "uninstall" the CLI, you must clear this cache, which will remove gemini-cli and any other packages previously executed with npx.
+
+The npx cache is a directory named `_npx` inside your main npm cache folder. You can find your npm cache path by running `npm config get cache`.
+
+**For macOS / Linux**
+
+```bash
+# The path is typically ~/.npm/_npx
+rm -rf "$(npm config get cache)/_npx"
+```
+
+**For Windows**
+
+_Command Prompt_
+
+```cmd
+:: The path is typically %LocalAppData%\npm-cache\_npx
+rmdir /s /q "%LocalAppData%\npm-cache\_npx"
+```
+
+_PowerShell_
+
+```powershell
+# The path is typically $env:LocalAppData\npm-cache\_npx
+Remove-Item -Path (Join-Path $env:LocalAppData "npm-cache\_npx") -Recurse -Force
+```
+
+### Method 2: Using npm (Global Install)
+
+If you installed the CLI globally (e.g., `npm install -g @google/gemini-cli`), use the `npm uninstall` command with the `-g` flag to remove it.
+
+```bash
+npm uninstall -g @google/gemini-cli
+```
+
+This command completely removes the package from your system.
+
+
+--- Content from: gemini-cli/docs/tos-privacy.md ---
+
+# Gemini CLI: Terms of Service and Privacy Notice
+
+Gemini CLI is an open-source tool that allows you to interact with Google's powerful language models directly from your command-line interface. The terms of service and privacy notices that apply to your usage of Gemini CLI depend on the type of account you use to authenticate with Google.
+
+This article outlines the specific terms and privacy policies applicable for different auth methods.
+
+## 1. Login with Google (Gemini Code Assist for [individuals](https://developers.google.com/gemini-code-assist/docs/overview#supported-features-gca))
+
+For users who authenticate using their Google account to access Gemini Code Assist for individuals:
+
+- Terms of Service: Your use of Gemini CLI is governed by the general [Google Terms of Service](https://policies.google.com/terms?hl=en-US).
+- Privacy Notice: The collection and use of your data are described in the [Gemini Code Assist Privacy Notice for Individuals](https://developers.google.com/gemini-code-assist/resources/privacy-notice-gemini-code-assist-individuals).
+
+## 2. Gemini API Key (Using Gemini Developer [API](https://ai.google.dev/gemini-api/docs) a: Unpaid Service, b: Paid Service)
+
+If you are using a Gemini API key for authentication, the following terms apply:
+
+- Terms of Service: Your use is subject to the [Gemini API Terms of Service](https://ai.google.dev/gemini-api/terms). For a. [Unpaid Service](https://ai.google.dev/gemini-api/terms#unpaid-services) or b. [Paid Service](https://ai.google.dev/gemini-api/terms#paid-services)
+- Privacy Notice: Information regarding data handling and privacy is detailed in the general [Google Privacy Policy](https://policies.google.com/privacy).
+
+## 3. Login with Google (for Workspace or Licensed Code Assist users)
+
+For users of Standard or Enterprise [edition](https://cloud.google.com/gemini/docs/codeassist/overview#editions-overview) of Gemini Code Assist:
+
+- Terms of Service: The [Google Cloud Platform Terms of Service](https://cloud.google.com/terms) govern your use of the service.
+- Privacy Notice: The handling of your data is outlined in the [Gemini Code Assist Privacy Notices](https://developers.google.com/gemini-code-assist/resources/privacy-notices).
+
+## 4. Vertex AI (Using Vertex AI Gen [API](https://cloud.google.com/vertex-ai/generative-ai/docs/reference/rest))
+
+If you are using an API key with a Vertex AI Gen API backend:
+
+- Terms of Service: Your usage is governed by the [Google Cloud Platform Service Terms](https://cloud.google.com/terms/service-terms/).
+- Privacy Notice: The [Google Cloud Privacy Notice](https://cloud.google.com/terms/cloud-privacy-notice) describes how your data is collected and managed.
+
+### Usage Statistics Opt-Out
+
+You may opt-out from sending Usage Statistics to Google data by following the instructions available here: [Usage Statistics Configuration](./cli/configuration.md#usage-statistics).
+
+## Frequently Asked Questions (FAQ) for Gemini CLI
+
+### 1. Is my code, including prompts and answers, used to train Google's models?
+
+This depends entirely on the type of auth method you use.
+
+- **Auth method 1:** Yes. When you use your personal Google account, the Gemini Code Assist Privacy Notice for Individuals applies. Under this notice, your **prompts, answers, and related code are collected** and may be used to improve Google's products, which includes model training.
+- **Auth method 2a:** Yes. When you use the Gemini API key Gemini API (Unpaid Service) terms apply. Under this notice , your **prompts, answers, and related code are collected** and may be used to improve Google's products, which includes model training.
+- **Auth method 2b, 3 & 4:** No. For these accounts, your data is governed by the Google Cloud or Gemini API (Paid Service) terms, which treat your inputs as confidential. Your code, prompts, and other inputs are **not** used to train models.
+
+### 2. What are "Usage Statistics" and what does the opt-out control?
+
+The "Usage Statistics" setting is the single control for all optional data collection in the Gemini CLI. The data it collects depends on your account type:
+
+- **Auth method 1:** When enabled, this setting allows Google to collect both anonymous telemetry (like commands run and performance metrics) and **your prompts and answers** for model improvement.
+- **Auth method 2a:** When enabled, this setting allows Google to collect both anonymous telemetry (like commands run and performance metrics) and **your prompts and answers** for model improvement. When disabled we will use your data as described in the [How Google Uses Your Data](https://ai.google.dev/gemini-api/terms#data-use-unpaid).
+- **Auth method 2b:** This setting only controls the collection of anonymous telemetry. Google logs prompts and responses for a limited period of time, solely for the purpose of detecting violations of the Prohibited Use Policy and any required legal or regulatory disclosures
+- **Auth methods 3 & 4:** This setting only controls the collection of anonymous telemetry. Your prompts and answers are never collected, regardless of this setting.
+
+You can disable Usage Statistics for any account type by following the instructions in the [Usage Statistics Configuration](./cli/configuration.md#usage-statistics) documentation.
+
+
+--- Content from: gemini-cli/docs/architecture.md ---
+
+# Gemini CLI Architecture Overview
+
+This document provides a high-level overview of the Gemini CLI's architecture.
+
+## Core components
+
+The Gemini CLI is primarily composed of two main packages, along with a suite of tools that can be used by the system in the course of handling command-line input:
+
+1.  **CLI package (`packages/cli`):**
+    - **Purpose:** This contains the user-facing portion of the Gemini CLI, such as handling the initial user input, presenting the final output, and managing the overall user experience.
+    - **Key functions contained in the package:**
+      - [Input processing](./cli/commands.md)
+      - History management
+      - Display rendering
+      - [Theme and UI customization](./cli/themes.md)
+      - [CLI configuration settings](./cli/configuration.md)
+
+2.  **Core package (`packages/core`):**
+    - **Purpose:** This acts as the backend for the Gemini CLI. It receives requests sent from `packages/cli`, orchestrates interactions with the Gemini API, and manages the execution of available tools.
+    - **Key functions contained in the package:**
+      - API client for communicating with the Google Gemini API
+      - Prompt construction and management
+      - Tool registration and execution logic
+      - State management for conversations or sessions
+      - Server-side configuration
+
+3.  **Tools (`packages/core/src/tools/`):**
+    - **Purpose:** These are individual modules that extend the capabilities of the Gemini model, allowing it to interact with the local environment (e.g., file system, shell commands, web fetching).
+    - **Interaction:** `packages/core` invokes these tools based on requests from the Gemini model.
+
+## Interaction Flow
+
+A typical interaction with the Gemini CLI follows this flow:
+
+1.  **User input:** The user types a prompt or command into the terminal, which is managed by `packages/cli`.
+2.  **Request to core:** `packages/cli` sends the user's input to `packages/core`.
+3.  **Request processed:** The core package:
+    - Constructs an appropriate prompt for the Gemini API, possibly including conversation history and available tool definitions.
+    - Sends the prompt to the Gemini API.
+4.  **Gemini API response:** The Gemini API processes the prompt and returns a response. This response might be a direct answer or a request to use one of the available tools.
+5.  **Tool execution (if applicable):**
+    - When the Gemini API requests a tool, the core package prepares to execute it.
+    - If the requested tool can modify the file system or execute shell commands, the user is first given details of the tool and its arguments, and the user must approve the execution.
+    - Read-only operations, such as reading files, might not require explicit user confirmation to proceed.
+    - Once confirmed, or if confirmation is not required, the core package executes the relevant action within the relevant tool, and the result is sent back to the Gemini API by the core package.
+    - The Gemini API processes the tool result and generates a final response.
+6.  **Response to CLI:** The core package sends the final response back to the CLI package.
+7.  **Display to user:** The CLI package formats and displays the response to the user in the terminal.
+
+## Key Design Principles
+
+- **Modularity:** Separating the CLI (frontend) from the Core (backend) allows for independent development and potential future extensions (e.g., different frontends for the same backend).
+- **Extensibility:** The tool system is designed to be extensible, allowing new capabilities to be added.
+- **User experience:** The CLI focuses on providing a rich and interactive terminal experience.
+
+
+--- Content from: gemini-cli/docs/integration-tests.md ---
+
+# Integration Tests
+
+This document provides information about the integration testing framework used in this project.
+
+## Overview
+
+The integration tests are designed to validate the end-to-end functionality of the Gemini CLI. They execute the built binary in a controlled environment and verify that it behaves as expected when interacting with the file system.
+
+These tests are located in the `integration-tests` directory and are run using a custom test runner.
+
+## Running the tests
+
+The integration tests are not run as part of the default `npm run test` command. They must be run explicitly using the `npm run test:integration:all` script.
+
+The integration tests can also be run using the following shortcut:
+
+```bash
+npm run test:e2e
+```
+
+## Running a specific set of tests
+
+To run a subset of test files, you can use `npm run <integration test command> <file_name1> ....` where <integration test command> is either `test:e2e` or `test:integration*` and `<file_name>` is any of the `.test.js` files in the `integration-tests/` directory. For example, the following command runs `list_directory.test.js` and `write_file.test.js`:
+
+```bash
+npm run test:e2e list_directory write_file
+```
+
+### Running a single test by name
+
+To run a single test by its name, use the `--test-name-pattern` flag:
+
+```bash
+npm run test:e2e -- --test-name-pattern "reads a file"
+```
+
+### Running all tests
+
+To run the entire suite of integration tests, use the following command:
+
+```bash
+npm run test:integration:all
+```
+
+### Sandbox matrix
+
+The `all` command will run tests for `no sandboxing`, `docker` and `podman`.
+Each individual type can be run using the following commands:
+
+```bash
+npm run test:integration:sandbox:none
+```
+
+```bash
+npm run test:integration:sandbox:docker
+```
+
+```bash
+npm run test:integration:sandbox:podman
+```
+
+## Diagnostics
+
+The integration test runner provides several options for diagnostics to help track down test failures.
+
+### Keeping test output
+
+You can preserve the temporary files created during a test run for inspection. This is useful for debugging issues with file system operations.
+
+To keep the test output, you can either use the `--keep-output` flag or set the `KEEP_OUTPUT` environment variable to `true`.
+
+```bash
+# Using the flag
+npm run test:integration:sandbox:none -- --keep-output
+
+# Using the environment variable
+KEEP_OUTPUT=true npm run test:integration:sandbox:none
+```
+
+When output is kept, the test runner will print the path to the unique directory for the test run.
+
+### Verbose output
+
+For more detailed debugging, the `--verbose` flag streams the real-time output from the `gemini` command to the console.
+
+```bash
+npm run test:integration:sandbox:none -- --verbose
+```
+
+When using `--verbose` and `--keep-output` in the same command, the output is streamed to the console and also saved to a log file within the test's temporary directory.
+
+The verbose output is formatted to clearly identify the source of the logs:
+
+```
+--- TEST: <file-name-without-js>:<test-name> ---
+... output from the gemini command ...
+--- END TEST: <file-name-without-js>:<test-name> ---
+```
+
+## Linting and formatting
+
+To ensure code quality and consistency, the integration test files are linted as part of the main build process. You can also manually run the linter and auto-fixer.
+
+### Running the linter
+
+To check for linting errors, run the following command:
+
+```bash
+npm run lint
+```
+
+You can include the `--fix` flag in the command to automatically fix any fixable linting errors:
+
+```bash
+npm run lint --fix
+```
+
+## Directory structure
+
+The integration tests create a unique directory for each test run inside the `.integration-tests` directory. Within this directory, a subdirectory is created for each test file, and within that, a subdirectory is created for each individual test case.
+
+This structure makes it easy to locate the artifacts for a specific test run, file, or case.
+
+```
+.integration-tests/
+└── <run-id>/
+    └── <test-file-name>.test.js/
+        └── <test-case-name>/
+            ├── output.log
+            └── ...other test artifacts...
+```
+
+## Continuous integration
+
+To ensure the integration tests are always run, a GitHub Actions workflow is defined in `.github/workflows/e2e.yml`. This workflow automatically runs the integration tests on every pull request and push to the `main` branch.
+
+The workflow runs the tests in different sandboxing environments to ensure Gemini CLI is tested across each:
+
+- `sandbox:none`: Runs the tests without any sandboxing.
+- `sandbox:docker`: Runs the tests in a Docker container.
+- `sandbox:podman`: Runs the tests in a Podman container.
+
+
+--- Content from: gemini-cli/docs/cli/authentication.md ---
+
+# Authentication Setup
+
+The Gemini CLI requires you to authenticate with Google's AI services. On initial startup you'll need to configure **one** of the following authentication methods:
+
+1.  **Login with Google (Gemini Code Assist):**
+    - Use this option to log in with your google account.
+    - During initial startup, Gemini CLI will direct you to a webpage for authentication. Once authenticated, your credentials will be cached locally so the web login can be skipped on subsequent runs.
+    - Note that the web login must be done in a browser that can communicate with the machine Gemini CLI is being run from. (Specifically, the browser will be redirected to a localhost url that Gemini CLI will be listening on).
+    - <a id="workspace-gca">Users may have to specify a GOOGLE_CLOUD_PROJECT if:</a>
+      1. You have a Google Workspace account. Google Workspace is a paid service for businesses and organizations that provides a suite of productivity tools, including a custom email domain (e.g. your-name@your-company.com), enhanced security features, and administrative controls. These accounts are often managed by an employer or school.
+      1. You have received a free Code Assist license through the [Google Developer Program](https://developers.google.com/program/plans-and-pricing) (including qualified Google Developer Experts)
+      1. You have been assigned a license to a current Gemini Code Assist standard or enterprise subscription.
+      1. You are using the product outside the [supported regions](https://developers.google.com/gemini-code-assist/resources/available-locations) for free individual usage.>
+      1. You are a Google account holder under the age of 18
+      - If you fall into one of these categories, you must first configure a Google Cloud Project Id to use, [enable the Gemini for Cloud API](https://cloud.google.com/gemini/docs/discover/set-up-gemini#enable-api) and [configure access permissions](https://cloud.google.com/gemini/docs/discover/set-up-gemini#grant-iam).
+
+      You can temporarily set the environment variable in your current shell session using the following command:
+
+      ```bash
+      export GOOGLE_CLOUD_PROJECT="YOUR_PROJECT_ID"
+      ```
+      - For repeated use, you can add the environment variable to your `.env` file (located in the project directory or user home directory) or your shell's configuration file (like `~/.bashrc`, `~/.zshrc`, or `~/.profile`). For example, the following command adds the environment variable to a `~/.bashrc` file:
+
+      ```bash
+      echo 'export GOOGLE_CLOUD_PROJECT="YOUR_PROJECT_ID"' >> ~/.bashrc
+      source ~/.bashrc
+      ```
+
+2.  **<a id="gemini-api-key"></a>Gemini API key:**
+    - Obtain your API key from Google AI Studio: [https://aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+    - Set the `GEMINI_API_KEY` environment variable. In the following methods, replace `YOUR_GEMINI_API_KEY` with the API key you obtained from Google AI Studio:
+      - You can temporarily set the environment variable in your current shell session using the following command:
+        ```bash
+        export GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+        ```
+      - For repeated use, you can add the environment variable to your `.env` file (located in the project directory or user home directory) or your shell's configuration file (like `~/.bashrc`, `~/.zshrc`, or `~/.profile`). For example, the following command adds the environment variable to a `~/.bashrc` file:
+        ```bash
+        echo 'export GEMINI_API_KEY="YOUR_GEMINI_API_KEY"' >> ~/.bashrc
+        source ~/.bashrc
+        ```
+
+3.  **Vertex AI:**
+    - If not using express mode:
+      - Ensure you have a Google Cloud project and have enabled the Vertex AI API.
+      - Set up Application Default Credentials (ADC), using the following command:
+        ```bash
+        gcloud auth application-default login
+        ```
+        For more information, see [Set up Application Default Credentials for Google Cloud](https://cloud.google.com/docs/authentication/provide-credentials-adc).
+      - Set the `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, and `GOOGLE_GENAI_USE_VERTEXAI` environment variables. In the following methods, replace `YOUR_PROJECT_ID` and `YOUR_PROJECT_LOCATION` with the relevant values for your project:
+        - You can temporarily set these environment variables in your current shell session using the following commands:
+          ```bash
+          export GOOGLE_CLOUD_PROJECT="YOUR_PROJECT_ID"
+          export GOOGLE_CLOUD_LOCATION="YOUR_PROJECT_LOCATION" # e.g., us-central1
+          export GOOGLE_GENAI_USE_VERTEXAI=true
+          ```
+        - For repeated use, you can add the environment variables to your `.env` file (located in the project directory or user home directory) or your shell's configuration file (like `~/.bashrc`, `~/.zshrc`, or `~/.profile`). For example, the following commands add the environment variables to a `~/.bashrc` file:
+          ```bash
+          echo 'export GOOGLE_CLOUD_PROJECT="YOUR_PROJECT_ID"' >> ~/.bashrc
+          echo 'export GOOGLE_CLOUD_LOCATION="YOUR_PROJECT_LOCATION"' >> ~/.bashrc
+          echo 'export GOOGLE_GENAI_USE_VERTEXAI=true' >> ~/.bashrc
+          source ~/.bashrc
+          ```
+    - If using express mode:
+      - Set the `GOOGLE_API_KEY` environment variable. In the following methods, replace `YOUR_GOOGLE_API_KEY` with your Vertex AI API key provided by express mode:
+        - You can temporarily set these environment variables in your current shell session using the following commands:
+          ```bash
+          export GOOGLE_API_KEY="YOUR_GOOGLE_API_KEY"
+          export GOOGLE_GENAI_USE_VERTEXAI=true
+          ```
+        - For repeated use, you can add the environment variables to your `.env` file (located in the project directory or user home directory) or your shell's configuration file (like `~/.bashrc`, `~/.zshrc`, or `~/.profile`). For example, the following commands add the environment variables to a `~/.bashrc` file:
+          ```bash
+          echo 'export GOOGLE_API_KEY="YOUR_GOOGLE_API_KEY"' >> ~/.bashrc
+          echo 'export GOOGLE_GENAI_USE_VERTEXAI=true' >> ~/.bashrc
+          source ~/.bashrc
+          ```
+
+
+--- Content from: gemini-cli/docs/cli/token-caching.md ---
+
+# Token Caching and Cost Optimization
+
+Gemini CLI automatically optimizes API costs through token caching when using API key authentication (Gemini API key or Vertex AI). This feature reuses previous system instructions and context to reduce the number of tokens processed in subsequent requests.
+
+**Token caching is available for:**
+
+- API key users (Gemini API key)
+- Vertex AI users (with project and location setup)
+
+**Token caching is not available for:**
+
+- OAuth users (Google Personal/Enterprise accounts) - the Code Assist API does not support cached content creation at this time
+
+You can view your token usage and cached token savings using the `/stats` command. When cached tokens are available, they will be displayed in the stats output.
+
+
+--- Content from: gemini-cli/docs/cli/themes.md ---
+
+# Themes
+
+Gemini CLI supports a variety of themes to customize its color scheme and appearance. You can change the theme to suit your preferences via the `/theme` command or `"theme":` configuration setting.
+
+## Available Themes
+
+Gemini CLI comes with a selection of pre-defined themes, which you can list using the `/theme` command within Gemini CLI:
+
+- **Dark Themes:**
+  - `ANSI`
+  - `Atom One`
+  - `Ayu`
+  - `Default`
+  - `Dracula`
+  - `GitHub`
+- **Light Themes:**
+  - `ANSI Light`
+  - `Ayu Light`
+  - `Default Light`
+  - `GitHub Light`
+  - `Google Code`
+  - `Xcode`
+
+### Changing Themes
+
+1.  Enter `/theme` into Gemini CLI.
+2.  A dialog or selection prompt appears, listing the available themes.
+3.  Using the arrow keys, select a theme. Some interfaces might offer a live preview or highlight as you select.
+4.  Confirm your selection to apply the theme.
+
+### Theme Persistence
+
+Selected themes are saved in Gemini CLI's [configuration](./configuration.md) so your preference is remembered across sessions.
+
+## Dark Themes
+
+### ANSI
+
+<img src="../assets/theme-ansi.png" alt="ANSI theme" width="600" />
+
+### Atom OneDark
+
+<img src="../assets/theme-atom-one.png" alt="Atom One theme" width="600">
+
+### Ayu
+
+<img src="../assets/theme-ayu.png" alt="Ayu theme" width="600">
+
+### Default
+
+<img src="../assets/theme-default.png" alt="Default theme" width="600">
+
+### Dracula
+
+<img src="../assets/theme-dracula.png" alt="Dracula theme" width="600">
+
+### GitHub
+
+<img src="../assets/theme-github.png" alt="GitHub theme" width="600">
+
+## Light Themes
+
+### ANSI Light
+
+<img src="../assets/theme-ansi-light.png" alt="ANSI Light theme" width="600">
+
+### Ayu Light
+
+<img src="../assets/theme-ayu-light.png" alt="Ayu Light theme" width="600">
+
+### Default Light
+
+<img src="../assets/theme-default-light.png" alt="Default Light theme" width="600">
+
+### GitHub Light
+
+<img src="../assets/theme-github-light.png" alt="GitHub Light theme" width="600">
+
+### Google Code
+
+<img src="../assets/theme-google-light.png" alt="Google Code theme" width="600">
+
+### Xcode
+
+<img src="../assets/theme-xcode-light.png" alt="Xcode Light theme" width="600">
+
+
+--- Content from: gemini-cli/docs/cli/tutorials.md ---
+
+# Tutorials
+
+This page contains tutorials for interacting with Gemini CLI.
+
+## Setting up a Model Context Protocol (MCP) server
+
+> [!CAUTION]
+> Before using a third-party MCP server, ensure you trust its source and understand the tools it provides. Your use of third-party servers is at your own risk.
+
+This tutorial demonstrates how to set up a MCP server, using the [GitHub MCP server](https://github.com/github/github-mcp-server) as an example. The GitHub MCP server provides tools for interacting with GitHub repositories, such as creating issues and commenting on pull requests.
+
+### Prerequisites
+
+Before you begin, ensure you have the following installed and configured:
+
+- **Docker:** Install and run [Docker].
+- **GitHub Personal Access Token (PAT):** Create a new [classic] or [fine-grained] PAT with the necessary scopes.
+
+[Docker]: https://www.docker.com/
+[classic]: https://github.com/settings/tokens/new
+[fine-grained]: https://github.com/settings/personal-access-tokens/new
+
+### Guide
+
+#### Configure the MCP server in `settings.json`
+
+In your project's root directory, create or open the [`.gemini/settings.json` file](./configuration.md). Within the file, add the `mcpServers` configuration block, which provides instructions for how to launch the GitHub MCP server.
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "ghcr.io/github/github-mcp-server"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+#### Set your GitHub token
+
+> [!CAUTION]
+> Using a broadly scoped personal access token that has access to personal and private repositories can lead to information from the private repository being leaked into the public repository. We recommend using a fine-grained access token that doesn't share access to both public and private repositories.
+
+Use an environment variable to store your GitHub PAT:
+
+```bash
+GITHUB_PERSONAL_ACCESS_TOKEN="pat_YourActualGitHubTokenHere"
+```
+
+Gemini CLI uses this value in the `mcpServers` configuration that you defined in the `settings.json` file.
+
+#### Launch Gemini CLI and verify the connection
+
+When you launch Gemini CLI, it automatically reads your configuration and launches the GitHub MCP server in the background. You can then use natural language prompts to ask Gemini CLI to perform GitHub actions. For example:
+
+```bash
+"get all open issues assigned to me in the 'foo/bar' repo and prioritize them"
+```
+
+
+--- Content from: gemini-cli/docs/cli/commands.md ---
+
+# CLI Commands
+
+Gemini CLI supports several built-in commands to help you manage your session, customize the interface, and control its behavior. These commands are prefixed with a forward slash (`/`), an at symbol (`@`), or an exclamation mark (`!`).
+
+## Slash commands (`/`)
+
+Slash commands provide meta-level control over the CLI itself.
+
+- **`/bug`**
+  - **Description:** File an issue about Gemini CLI. By default, the issue is filed within the GitHub repository for Gemini CLI. The string you enter after `/bug` will become the headline for the bug being filed. The default `/bug` behavior can be modified using the `bugCommand` setting in your `.gemini/settings.json` files.
+
+- **`/chat`**
+  - **Description:** Save and resume conversation history for branching conversation state interactively, or resuming a previous state from a later session.
+  - **Sub-commands:**
+    - **`save`**
+      - **Description:** Saves the current conversation history. You must add a `<tag>` for identifying the conversation state.
+      - **Usage:** `/chat save <tag>`
+    - **`resume`**
+      - **Description:** Resumes a conversation from a previous save.
+      - **Usage:** `/chat resume <tag>`
+    - **`list`**
+      - **Description:** Lists available tags for chat state resumption.
+
+- **`/clear`**
+  - **Description:** Clear the terminal screen, including the visible session history and scrollback within the CLI. The underlying session data (for history recall) might be preserved depending on the exact implementation, but the visual display is cleared.
+  - **Keyboard shortcut:** Press **Ctrl+L** at any time to perform a clear action.
+
+- **`/compress`**
+  - **Description:** Replace the entire chat context with a summary. This saves on tokens used for future tasks while retaining a high level summary of what has happened.
+
+- **`/editor`**
+  - **Description:** Open a dialog for selecting supported editors.
+
+- **`/help`** (or **`/?`**)
+  - **Description:** Display help information about the Gemini CLI, including available commands and their usage.
+
+- **`/mcp`**
+  - **Description:** List configured Model Context Protocol (MCP) servers, their connection status, server details, and available tools.
+  - **Sub-commands:**
+    - **`desc`** or **`descriptions`**:
+      - **Description:** Show detailed descriptions for MCP servers and tools.
+    - **`nodesc`** or **`nodescriptions`**:
+      - **Description:** Hide tool descriptions, showing only the tool names.
+    - **`schema`**:
+      - **Description:** Show the full JSON schema for the tool's configured parameters.
+  - **Keyboard Shortcut:** Press **Ctrl+T** at any time to toggle between showing and hiding tool descriptions.
+
+- **`/memory`**
+  - **Description:** Manage the AI's instructional context (hierarchical memory loaded from `GEMINI.md` files).
+  - **Sub-commands:**
+    - **`add`**:
+      - **Description:** Adds the following text to the AI's memory. Usage: `/memory add <text to remember>`
+    - **`show`**:
+      - **Description:** Display the full, concatenated content of the current hierarchical memory that has been loaded from all `GEMINI.md` files. This lets you inspect the instructional context being provided to the Gemini model.
+    - **`refresh`**:
+      - **Description:** Reload the hierarchical instructional memory from all `GEMINI.md` files found in the configured locations (global, project/ancestors, and sub-directories). This command updates the model with the latest `GEMINI.md` content.
+    - **Note:** For more details on how `GEMINI.md` files contribute to hierarchical memory, see the [CLI Configuration documentation](./configuration.md#4-geminimd-files-hierarchical-instructional-context).
+
+- **`/restore`**
+  - **Description:** Restores the project files to the state they were in just before a tool was executed. This is particularly useful for undoing file edits made by a tool. If run without a tool call ID, it will list available checkpoints to restore from.
+  - **Usage:** `/restore [tool_call_id]`
+  - **Note:** Only available if the CLI is invoked with the `--checkpointing` option or configured via [settings](./configuration.md). See [Checkpointing documentation](../checkpointing.md) for more details.
+
+- **`/stats`**
+  - **Description:** Display detailed statistics for the current Gemini CLI session, including token usage, cached token savings (when available), and session duration. Note: Cached token information is only displayed when cached tokens are being used, which occurs with API key authentication but not with OAuth authentication at this time.
+
+- [**`/theme`**](./themes.md)
+  - **Description:** Open a dialog that lets you change the visual theme of Gemini CLI.
+
+- **`/auth`**
+  - **Description:** Open a dialog that lets you change the authentication method.
+
+- **`/about`**
+  - **Description:** Show version info. Please share this information when filing issues.
+
+- [**`/tools`**](../tools/index.md)
+  - **Description:** Display a list of tools that are currently available within Gemini CLI.
+  - **Sub-commands:**
+    - **`desc`** or **`descriptions`**:
+      - **Description:** Show detailed descriptions of each tool, including each tool's name with its full description as provided to the model.
+    - **`nodesc`** or **`nodescriptions`**:
+      - **Description:** Hide tool descriptions, showing only the tool names.
+
+- **`/quit`** (or **`/exit`**)
+  - **Description:** Exit Gemini CLI.
+
+## At commands (`@`)
+
+At commands are used to include the content of files or directories as part of your prompt to Gemini. These commands include git-aware filtering.
+
+- **`@<path_to_file_or_directory>`**
+  - **Description:** Inject the content of the specified file or files into your current prompt. This is useful for asking questions about specific code, text, or collections of files.
+  - **Examples:**
+    - `@path/to/your/file.txt Explain this text.`
+    - `@src/my_project/ Summarize the code in this directory.`
+    - `What is this file about? @README.md`
+  - **Details:**
+    - If a path to a single file is provided, the content of that file is read.
+    - If a path to a directory is provided, the command attempts to read the content of files within that directory and any subdirectories.
+    - Spaces in paths should be escaped with a backslash (e.g., `@My\ Documents/file.txt`).
+    - The command uses the `read_many_files` tool internally. The content is fetched and then inserted into your query before being sent to the Gemini model.
+    - **Git-aware filtering:** By default, git-ignored files (like `node_modules/`, `dist/`, `.env`, `.git/`) are excluded. This behavior can be changed via the `fileFiltering` settings.
+    - **File types:** The command is intended for text-based files. While it might attempt to read any file, binary files or very large files might be skipped or truncated by the underlying `read_many_files` tool to ensure performance and relevance. The tool indicates if files were skipped.
+  - **Output:** The CLI will show a tool call message indicating that `read_many_files` was used, along with a message detailing the status and the path(s) that were processed.
+
+- **`@` (Lone at symbol)**
+  - **Description:** If you type a lone `@` symbol without a path, the query is passed as-is to the Gemini model. This might be useful if you are specifically talking _about_ the `@` symbol in your prompt.
+
+### Error handling for `@` commands
+
+- If the path specified after `@` is not found or is invalid, an error message will be displayed, and the query might not be sent to the Gemini model, or it will be sent without the file content.
+- If the `read_many_files` tool encounters an error (e.g., permission issues), this will also be reported.
+
+## Shell mode & passthrough commands (`!`)
+
+The `!` prefix lets you interact with your system's shell directly from within Gemini CLI.
+
+- **`!<shell_command>`**
+  - **Description:** Execute the given `<shell_command>` in your system's default shell. Any output or errors from the command are displayed in the terminal.
+  - **Examples:**
+    - `!ls -la` (executes `ls -la` and returns to Gemini CLI)
+    - `!git status` (executes `git status` and returns to Gemini CLI)
+
+- **`!` (Toggle shell mode)**
+  - **Description:** Typing `!` on its own toggles shell mode.
+    - **Entering shell mode:**
+      - When active, shell mode uses a different coloring and a "Shell Mode Indicator".
+      - While in shell mode, text you type is interpreted directly as a shell command.
+    - **Exiting shell mode:**
+      - When exited, the UI reverts to its standard appearance and normal Gemini CLI behavior resumes.
+
+- **Caution for all `!` usage:** Commands you execute in shell mode have the same permissions and impact as if you ran them directly in your terminal.
+
+
+--- Content from: gemini-cli/docs/cli/configuration.md ---
+
+# Gemini CLI Configuration
+
+Gemini CLI offers several ways to configure its behavior, including environment variables, command-line arguments, and settings files. This document outlines the different configuration methods and available settings.
+
+## Configuration layers
+
+Configuration is applied in the following order of precedence (lower numbers are overridden by higher numbers):
+
+1.  **Default values:** Hardcoded defaults within the application.
+2.  **User settings file:** Global settings for the current user.
+3.  **Project settings file:** Project-specific settings.
+4.  **Environment variables:** System-wide or session-specific variables, potentially loaded from `.env` files.
+5.  **Command-line arguments:** Values passed when launching the CLI.
+
+## The user settings file and project settings file
+
+Gemini CLI uses `settings.json` files for persistent configuration. There are two locations for these files:
+
+- **User settings file:**
+  - **Location:** `~/.gemini/settings.json` (where `~` is your home directory).
+  - **Scope:** Applies to all Gemini CLI sessions for the current user.
+- **Project settings file:**
+  - **Location:** `.gemini/settings.json` within your project's root directory.
+  - **Scope:** Applies only when running Gemini CLI from that specific project. Project settings override user settings.
+
+**Note on environment variables in settings:** String values within your `settings.json` files can reference environment variables using either `$VAR_NAME` or `${VAR_NAME}` syntax. These variables will be automatically resolved when the settings are loaded. For example, if you have an environment variable `MY_API_TOKEN`, you could use it in `settings.json` like this: `"apiKey": "$MY_API_TOKEN"`.
+
+### The `.gemini` directory in your project
+
+In addition to a project settings file, a project's `.gemini` directory can contain other project-specific files related to Gemini CLI's operation, such as:
+
+- [Custom sandbox profiles](#sandboxing) (e.g., `.gemini/sandbox-macos-custom.sb`, `.gemini/sandbox.Dockerfile`).
+
+### Available settings in `settings.json`:
+
+- **`contextFileName`** (string or array of strings):
+  - **Description:** Specifies the filename for context files (e.g., `GEMINI.md`, `AGENTS.md`). Can be a single filename or a list of accepted filenames.
+  - **Default:** `GEMINI.md`
+  - **Example:** `"contextFileName": "AGENTS.md"`
+
+- **`bugCommand`** (object):
+  - **Description:** Overrides the default URL for the `/bug` command.
+  - **Default:** `"urlTemplate": "https://github.com/google-gemini/gemini-cli/issues/new?template=bug_report.yml&title={title}&info={info}"`
+  - **Properties:**
+    - **`urlTemplate`** (string): A URL that can contain `{title}` and `{info}` placeholders.
+  - **Example:**
+    ```json
+    "bugCommand": {
+      "urlTemplate": "https://bug.example.com/new?title={title}&info={info}"
+    }
+    ```
+
+- **`fileFiltering`** (object):
+  - **Description:** Controls git-aware file filtering behavior for @ commands and file discovery tools.
+  - **Default:** `"respectGitIgnore": true, "enableRecursiveFileSearch": true`
+  - **Properties:**
+    - **`respectGitIgnore`** (boolean): Whether to respect .gitignore patterns when discovering files. When set to `true`, git-ignored files (like `node_modules/`, `dist/`, `.env`) are automatically excluded from @ commands and file listing operations.
+    - **`enableRecursiveFileSearch`** (boolean): Whether to enable searching recursively for filenames under the current tree when completing @ prefixes in the prompt.
+  - **Example:**
+    ```json
+    "fileFiltering": {
+      "respectGitIgnore": true,
+      "enableRecursiveFileSearch": false
+    }
+    ```
+
+- **`coreTools`** (array of strings):
+  - **Description:** Allows you to specify a list of core tool names that should be made available to the model. This can be used to restrict the set of built-in tools. See [Built-in Tools](../core/tools-api.md#built-in-tools) for a list of core tools. You can also specify command-specific restrictions for tools that support it, like the `ShellTool`. For example, `"coreTools": ["ShellTool(ls -l)"]` will only allow the `ls -l` command to be executed.
+  - **Default:** All tools available for use by the Gemini model.
+  - **Example:** `"coreTools": ["ReadFileTool", "GlobTool", "ShellTool(ls)"]`.
+
+- **`excludeTools`** (array of strings):
+  - **Description:** Allows you to specify a list of core tool names that should be excluded from the model. A tool listed in both `excludeTools` and `coreTools` is excluded. You can also specify command-specific restrictions for tools that support it, like the `ShellTool`. For example, `"excludeTools": ["ShellTool(rm -rf)"]` will block the `rm -rf` command.
+  - **Default**: No tools excluded.
+  - **Example:** `"excludeTools": ["run_shell_command", "findFiles"]`.
+  - **Security Note:** Command-specific restrictions in
+    `excludeTools` for `run_shell_command` are based on simple string matching and can be easily bypassed. This feature is **not a security mechanism** and should not be relied upon to safely execute untrusted code. It is recommended to use `coreTools` to explicitly select commands
+    that can be executed.
+
+- **`autoAccept`** (boolean):
+  - **Description:** Controls whether the CLI automatically accepts and executes tool calls that are considered safe (e.g., read-only operations) without explicit user confirmation. If set to `true`, the CLI will bypass the confirmation prompt for tools deemed safe.
+  - **Default:** `false`
+  - **Example:** `"autoAccept": true`
+
+- **`theme`** (string):
+  - **Description:** Sets the visual [theme](./themes.md) for Gemini CLI.
+  - **Default:** `"Default"`
+  - **Example:** `"theme": "GitHub"`
+
+- **`sandbox`** (boolean or string):
+  - **Description:** Controls whether and how to use sandboxing for tool execution. If set to `true`, Gemini CLI uses a pre-built `gemini-cli-sandbox` Docker image. For more information, see [Sandboxing](#sandboxing).
+  - **Default:** `false`
+  - **Example:** `"sandbox": "docker"`
+
+- **`toolDiscoveryCommand`** (string):
+  - **Description:** Defines a custom shell command for discovering tools from your project. The shell command must return on `stdout` a JSON array of [function declarations](https://ai.google.dev/gemini-api/docs/function-calling#function-declarations). Tool wrappers are optional.
+  - **Default:** Empty
+  - **Example:** `"toolDiscoveryCommand": "bin/get_tools"`
+
+- **`toolCallCommand`** (string):
+  - **Description:** Defines a custom shell command for calling a specific tool that was discovered using `toolDiscoveryCommand`. The shell command must meet the following criteria:
+    - It must take function `name` (exactly as in [function declaration](https://ai.google.dev/gemini-api/docs/function-calling#function-declarations)) as first command line argument.
+    - It must read function arguments as JSON on `stdin`, analogous to [`functionCall.args`](https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference#functioncall).
+    - It must return function output as JSON on `stdout`, analogous to [`functionResponse.response.content`](https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference#functionresponse).
+  - **Default:** Empty
+  - **Example:** `"toolCallCommand": "bin/call_tool"`
+
+- **`mcpServers`** (object):
+  - **Description:** Configures connections to one or more Model-Context Protocol (MCP) servers for discovering and using custom tools. Gemini CLI attempts to connect to each configured MCP server to discover available tools. If multiple MCP servers expose a tool with the same name, the tool names will be prefixed with the server alias you defined in the configuration (e.g., `serverAlias__actualToolName`) to avoid conflicts. Note that the system might strip certain schema properties from MCP tool definitions for compatibility.
+  - **Default:** Empty
+  - **Properties:**
+    - **`<SERVER_NAME>`** (object): The server parameters for the named server.
+      - `command` (string, required): The command to execute to start the MCP server.
+      - `args` (array of strings, optional): Arguments to pass to the command.
+      - `env` (object, optional): Environment variables to set for the server process.
+      - `cwd` (string, optional): The working directory in which to start the server.
+      - `timeout` (number, optional): Timeout in milliseconds for requests to this MCP server.
+      - `trust` (boolean, optional): Trust this server and bypass all tool call confirmations.
+  - **Example:**
+    ```json
+    "mcpServers": {
+      "myPythonServer": {
+        "command": "python",
+        "args": ["mcp_server.py", "--port", "8080"],
+        "cwd": "./mcp_tools/python",
+        "timeout": 5000
+      },
+      "myNodeServer": {
+        "command": "node",
+        "args": ["mcp_server.js"],
+        "cwd": "./mcp_tools/node"
+      },
+      "myDockerServer": {
+        "command": "docker",
+        "args": ["run", "i", "--rm", "-e", "API_KEY", "ghcr.io/foo/bar"],
+        "env": {
+          "API_KEY": "$MY_API_TOKEN"
+        }
+      },
+    }
+    ```
+
+- **`checkpointing`** (object):
+  - **Description:** Configures the checkpointing feature, which allows you to save and restore conversation and file states. See the [Checkpointing documentation](../checkpointing.md) for more details.
+  - **Default:** `{"enabled": false}`
+  - **Properties:**
+    - **`enabled`** (boolean): When `true`, the `/restore` command is available.
+
+- **`preferredEditor`** (string):
+  - **Description:** Specifies the preferred editor to use for viewing diffs.
+  - **Default:** `vscode`
+  - **Example:** `"preferredEditor": "vscode"`
+
+- **`telemetry`** (object)
+  - **Description:** Configures logging and metrics collection for Gemini CLI. For more information, see [Telemetry](../telemetry.md).
+  - **Default:** `{"enabled": false, "target": "local", "otlpEndpoint": "http://localhost:4317", "logPrompts": true}`
+  - **Properties:**
+    - **`enabled`** (boolean): Whether or not telemetry is enabled.
+    - **`target`** (string): The destination for collected telemetry. Supported values are `local` and `gcp`.
+    - **`otlpEndpoint`** (string): The endpoint for the OTLP Exporter.
+    - **`logPrompts`** (boolean): Whether or not to include the content of user prompts in the logs.
+  - **Example:**
+    ```json
+    "telemetry": {
+      "enabled": true,
+      "target": "local",
+      "otlpEndpoint": "http://localhost:16686",
+      "logPrompts": false
+    }
+    ```
+- **`usageStatisticsEnabled`** (boolean):
+  - **Description:** Enables or disables the collection of usage statistics. See [Usage Statistics](#usage-statistics) for more information.
+  - **Default:** `true`
+  - **Example:**
+    ```json
+    "usageStatisticsEnabled": false
+    ```
+
+- **`hideTips`** (boolean):
+  - **Description:** Enables or disables helpful tips in the CLI interface.
+  - **Default:** `false`
+  - **Example:**
+
+    ```json
+    "hideTips": true
+    ```
+
+### Example `settings.json`:
+
+```json
+{
+  "theme": "GitHub",
+  "sandbox": "docker",
+  "toolDiscoveryCommand": "bin/get_tools",
+  "toolCallCommand": "bin/call_tool",
+  "mcpServers": {
+    "mainServer": {
+      "command": "bin/mcp_server.py"
+    },
+    "anotherServer": {
+      "command": "node",
+      "args": ["mcp_server.js", "--verbose"]
+    }
+  },
+  "telemetry": {
+    "enabled": true,
+    "target": "local",
+    "otlpEndpoint": "http://localhost:4317",
+    "logPrompts": true
+  },
+  "usageStatisticsEnabled": true,
+  "hideTips": false
+}
+```
+
+## Shell History
+
+The CLI keeps a history of shell commands you run. To avoid conflicts between different projects, this history is stored in a project-specific directory within your user's home folder.
+
+- **Location:** `~/.gemini/tmp/<project_hash>/shell_history`
+  - `<project_hash>` is a unique identifier generated from your project's root path.
+  - The history is stored in a file named `shell_history`.
+
+## Environment Variables & `.env` Files
+
+Environment variables are a common way to configure applications, especially for sensitive information like API keys or for settings that might change between environments.
+
+The CLI automatically loads environment variables from an `.env` file. The loading order is:
+
+1.  `.env` file in the current working directory.
+2.  If not found, it searches upwards in parent directories until it finds an `.env` file or reaches the project root (identified by a `.git` folder) or the home directory.
+3.  If still not found, it looks for `~/.env` (in the user's home directory).
+
+- **`GEMINI_API_KEY`** (Required):
+  - Your API key for the Gemini API.
+  - **Crucial for operation.** The CLI will not function without it.
+  - Set this in your shell profile (e.g., `~/.bashrc`, `~/.zshrc`) or an `.env` file.
+- **`GEMINI_MODEL`**:
+  - Specifies the default Gemini model to use.
+  - Overrides the hardcoded default
+  - Example: `export GEMINI_MODEL="gemini-2.5-flash"`
+- **`GOOGLE_API_KEY`**:
+  - Your Google Cloud API key.
+  - Required for using Vertex AI in express mode.
+  - Ensure you have the necessary permissions and set the `GOOGLE_GENAI_USE_VERTEXAI=true` environment variable.
+  - Example: `export GOOGLE_API_KEY="YOUR_GOOGLE_API_KEY"`.
+- **`GOOGLE_CLOUD_PROJECT`**:
+  - Your Google Cloud Project ID.
+  - Required for using Code Assist or Vertex AI.
+  - If using Vertex AI, ensure you have the necessary permissions and set the `GOOGLE_GENAI_USE_VERTEXAI=true` environment variable.
+  - Example: `export GOOGLE_CLOUD_PROJECT="YOUR_PROJECT_ID"`.
+- **`GOOGLE_APPLICATION_CREDENTIALS`** (string):
+  - **Description:** The path to your Google Application Credentials JSON file.
+  - **Example:** `export GOOGLE_APPLICATION_CREDENTIALS="/path/to/your/credentials.json"`
+- **`OTLP_GOOGLE_CLOUD_PROJECT`**:
+  - Your Google Cloud Project ID for Telemetry in Google Cloud
+  - Example: `export OTLP_GOOGLE_CLOUD_PROJECT="YOUR_PROJECT_ID"`.
+- **`GOOGLE_CLOUD_LOCATION`**:
+  - Your Google Cloud Project Location (e.g., us-central1).
+  - Required for using Vertex AI in non express mode.
+  - If using Vertex AI, ensure you have the necessary permissions and set the `GOOGLE_GENAI_USE_VERTEXAI=true` environment variable.
+  - Example: `export GOOGLE_CLOUD_LOCATION="YOUR_PROJECT_LOCATION"`.
+- **`GEMINI_SANDBOX`**:
+  - Alternative to the `sandbox` setting in `settings.json`.
+  - Accepts `true`, `false`, `docker`, `podman`, or a custom command string.
+- **`SEATBELT_PROFILE`** (macOS specific):
+  - Switches the Seatbelt (`sandbox-exec`) profile on macOS.
+  - `permissive-open`: (Default) Restricts writes to the project folder (and a few other folders, see `packages/cli/src/utils/sandbox-macos-permissive-open.sb`) but allows other operations.
+  - `strict`: Uses a strict profile that declines operations by default.
+  - `<profile_name>`: Uses a custom profile. To define a custom profile, create a file named `sandbox-macos-<profile_name>.sb` in your project's `.gemini/` directory (e.g., `my-project/.gemini/sandbox-macos-custom.sb`).
+- **`DEBUG` or `DEBUG_MODE`** (often used by underlying libraries or the CLI itself):
+  - Set to `true` or `1` to enable verbose debug logging, which can be helpful for troubleshooting.
+- **`NO_COLOR`**:
+  - Set to any value to disable all color output in the CLI.
+- **`CLI_TITLE`**:
+  - Set to a string to customize the title of the CLI.
+- **`CODE_ASSIST_ENDPOINT`**:
+  - Specifies the endpoint for the code assist server.
+  - This is useful for development and testing.
+
+## Command-Line Arguments
+
+Arguments passed directly when running the CLI can override other configurations for that specific session.
+
+- **`--model <model_name>`** (**`-m <model_name>`**):
+  - Specifies the Gemini model to use for this session.
+  - Example: `npm start -- --model gemini-1.5-pro-latest`
+- **`--prompt <your_prompt>`** (**`-p <your_prompt>`**):
+  - Used to pass a prompt directly to the command. This invokes Gemini CLI in a non-interactive mode.
+- **`--sandbox`** (**`-s`**):
+  - Enables sandbox mode for this session.
+- **`--sandbox-image`**:
+  - Sets the sandbox image URI.
+- **`--debug_mode`** (**`-d`**):
+  - Enables debug mode for this session, providing more verbose output.
+- **`--all_files`** (**`-a`**):
+  - If set, recursively includes all files within the current directory as context for the prompt.
+- **`--help`** (or **`-h`**):
+  - Displays help information about command-line arguments.
+- **`--show_memory_usage`**:
+  - Displays the current memory usage.
+- **`--yolo`**:
+  - Enables YOLO mode, which automatically approves all tool calls.
+- **`--telemetry`**:
+  - Enables [telemetry](../telemetry.md).
+- **`--telemetry-target`**:
+  - Sets the telemetry target. See [telemetry](../telemetry.md) for more information.
+- **`--telemetry-otlp-endpoint`**:
+  - Sets the OTLP endpoint for telemetry. See [telemetry](../telemetry.md) for more information.
+- **`--telemetry-log-prompts`**:
+  - Enables logging of prompts for telemetry. See [telemetry](../telemetry.md) for more information.
+- **`--checkpointing`**:
+  - Enables [checkpointing](./commands.md#checkpointing-commands).
+- **`--version`**:
+  - Displays the version of the CLI.
+
+## Context Files (Hierarchical Instructional Context)
+
+While not strictly configuration for the CLI's _behavior_, context files (defaulting to `GEMINI.md` but configurable via the `contextFileName` setting) are crucial for configuring the _instructional context_ (also referred to as "memory") provided to the Gemini model. This powerful feature allows you to give project-specific instructions, coding style guides, or any relevant background information to the AI, making its responses more tailored and accurate to your needs. The CLI includes UI elements, such as an indicator in the footer showing the number of loaded context files, to keep you informed about the active context.
+
+- **Purpose:** These Markdown files contain instructions, guidelines, or context that you want the Gemini model to be aware of during your interactions. The system is designed to manage this instructional context hierarchically.
+
+### Example Context File Content (e.g., `GEMINI.md`)
+
+Here's a conceptual example of what a context file at the root of a TypeScript project might contain:
+
+```markdown
+# Project: My Awesome TypeScript Library
+
+## General Instructions:
+
+- When generating new TypeScript code, please follow the existing coding style.
+- Ensure all new functions and classes have JSDoc comments.
+- Prefer functional programming paradigms where appropriate.
+- All code should be compatible with TypeScript 5.0 and Node.js 18+.
+
+## Coding Style:
+
+- Use 2 spaces for indentation.
+- Interface names should be prefixed with `I` (e.g., `IUserService`).
+- Private class members should be prefixed with an underscore (`_`).
+- Always use strict equality (`===` and `!==`).
+
+## Specific Component: `src/api/client.ts`
+
+- This file handles all outbound API requests.
+- When adding new API call functions, ensure they include robust error handling and logging.
+- Use the existing `fetchWithRetry` utility for all GET requests.
+
+## Regarding Dependencies:
+
+- Avoid introducing new external dependencies unless absolutely necessary.
+- If a new dependency is required, please state the reason.
+```
+
+This example demonstrates how you can provide general project context, specific coding conventions, and even notes about particular files or components. The more relevant and precise your context files are, the better the AI can assist you. Project-specific context files are highly encouraged to establish conventions and context.
+
+- **Hierarchical Loading and Precedence:** The CLI implements a sophisticated hierarchical memory system by loading context files (e.g., `GEMINI.md`) from several locations. Content from files lower in this list (more specific) typically overrides or supplements content from files higher up (more general). The exact concatenation order and final context can be inspected using the `/memory show` command. The typical loading order is:
+  1.  **Global Context File:**
+      - Location: `~/.gemini/<contextFileName>` (e.g., `~/.gemini/GEMINI.md` in your user home directory).
+      - Scope: Provides default instructions for all your projects.
+  2.  **Project Root & Ancestors Context Files:**
+      - Location: The CLI searches for the configured context file in the current working directory and then in each parent directory up to either the project root (identified by a `.git` folder) or your home directory.
+      - Scope: Provides context relevant to the entire project or a significant portion of it.
+  3.  **Sub-directory Context Files (Contextual/Local):**
+      - Location: The CLI also scans for the configured context file in subdirectories _below_ the current working directory (respecting common ignore patterns like `node_modules`, `.git`, etc.).
+      - Scope: Allows for highly specific instructions relevant to a particular component, module, or sub-section of your project.
+- **Concatenation & UI Indication:** The contents of all found context files are concatenated (with separators indicating their origin and path) and provided as part of the system prompt to the Gemini model. The CLI footer displays the count of loaded context files, giving you a quick visual cue about the active instructional context.
+- **Commands for Memory Management:**
+  - Use `/memory refresh` to force a re-scan and reload of all context files from all configured locations. This updates the AI's instructional context.
+  - Use `/memory show` to display the combined instructional context currently loaded, allowing you to verify the hierarchy and content being used by the AI.
+  - See the [Commands documentation](./commands.md#memory) for full details on the `/memory` command and its sub-commands (`show` and `refresh`).
+
+By understanding and utilizing these configuration layers and the hierarchical nature of context files, you can effectively manage the AI's memory and tailor the Gemini CLI's responses to your specific needs and projects.
+
+## Sandboxing
+
+The Gemini CLI can execute potentially unsafe operations (like shell commands and file modifications) within a sandboxed environment to protect your system.
+
+Sandboxing is disabled by default, but you can enable it in a few ways:
+
+- Using `--sandbox` or `-s` flag.
+- Setting `GEMINI_SANDBOX` environment variable.
+- Sandbox is enabled in `--yolo` mode by default.
+
+By default, it uses a pre-built `gemini-cli-sandbox` Docker image.
+
+For project-specific sandboxing needs, you can create a custom Dockerfile at `.gemini/sandbox.Dockerfile` in your project's root directory. This Dockerfile can be based on the base sandbox image:
+
+```dockerfile
+FROM gemini-cli-sandbox
+
+# Add your custom dependencies or configurations here
+# For example:
+# RUN apt-get update && apt-get install -y some-package
+# COPY ./my-config /app/my-config
+```
+
+When `.gemini/sandbox.Dockerfile` exists, you can use `BUILD_SANDBOX` environment variable when running Gemini CLI to automatically build the custom sandbox image:
+
+```bash
+BUILD_SANDBOX=1 gemini -s
+```
+
+## Usage Statistics
+
+To help us improve the Gemini CLI, we collect anonymized usage statistics. This data helps us understand how the CLI is used, identify common issues, and prioritize new features.
+
+**What we collect:**
+
+- **Tool Calls:** We log the names of the tools that are called, whether they succeed or fail, and how long they take to execute. We do not collect the arguments passed to the tools or any data returned by them.
+- **API Requests:** We log the Gemini model used for each request, the duration of the request, and whether it was successful. We do not collect the content of the prompts or responses.
+- **Session Information:** We collect information about the configuration of the CLI, such as the enabled tools and the approval mode.
+
+**What we DON'T collect:**
+
+- **Personally Identifiable Information (PII):** We do not collect any personal information, such as your name, email address, or API keys.
+- **Prompt and Response Content:** We do not log the content of your prompts or the responses from the Gemini model.
+- **File Content:** We do not log the content of any files that are read or written by the CLI.
+
+**How to opt out:**
+
+You can opt out of usage statistics collection at any time by setting the `usageStatisticsEnabled` property to `false` in your `settings.json` file:
+
+```json
+{
+  "usageStatisticsEnabled": false
+}
+```
+
+
+--- Content from: gemini-cli/docs/cli/index.md ---
+
+# Gemini CLI
+
+Within Gemini CLI, `packages/cli` is the frontend for users to send and receive prompts with the Gemini AI model and its associated tools. For a general overview of Gemini CLI, see the [main documentation page](../index.md).
+
+## Navigating this section
+
+- **[Authentication](./authentication.md):** A guide to setting up authentication with Google's AI services.
+- **[Commands](./commands.md):** A reference for Gemini CLI commands (e.g., `/help`, `/tools`, `/theme`).
+- **[Configuration](./configuration.md):** A guide to tailoring Gemini CLI behavior using configuration files.
+- **[Token Caching](./token-caching.md):** Optimize API costs through token caching.
+- **[Themes](./themes.md)**: A guide to customizing the CLI's appearance with different themes.
+- **[Tutorials](tutorials.md)**: A tutorial showing how to use Gemini CLI to automate a development task.
+
+## Non-interactive mode
+
+Gemini CLI can be run in a non-interactive mode, which is useful for scripting and automation. In this mode, you pipe input to the CLI, it executes the command, and then it exits.
+
+The following example pipes a command to Gemini CLI from your terminal:
+
+```bash
+echo "What is fine tuning?" | gemini
+```
+
+Gemini CLI executes the command and prints the output to your terminal. Note that you can achieve the same behavior by using the `--prompt` or `-p` flag. For example:
+
+```bash
+gemini -p "What is fine tuning?"
+```
+
+
+--- Content from: gemini-cli/docs/tools/web-search.md ---
+
+# Web Search Tool (`google_web_search`)
+
+This document describes the `google_web_search` tool.
+
+## Description
+
+Use `google_web_search` to perform a web search using Google Search via the Gemini API. The `google_web_search` tool returns a summary of web results with sources.
+
+### Arguments
+
+`google_web_search` takes one argument:
+
+- `query` (string, required): The search query.
+
+## How to use `google_web_search` with the Gemini CLI
+
+The `google_web_search` tool sends a query to the Gemini API, which then performs a web search. `google_web_search` will return a generated response based on the search results, including citations and sources.
+
+Usage:
+
+```
+google_web_search(query="Your query goes here.")
+```
+
+## `google_web_search` examples
+
+Get information on a topic:
+
+```
+google_web_search(query="latest advancements in AI-powered code generation")
+```
+
+## Important notes
+
+- **Response returned:** The `google_web_search` tool returns a processed summary, not a raw list of search results.
+- **Citations:** The response includes citations to the sources used to generate the summary.
+
+
+--- Content from: gemini-cli/docs/tools/mcp-server.md ---
+
+# MCP servers with the Gemini CLI
+
+This document provides a guide to configuring and using Model Context Protocol (MCP) servers with the Gemini CLI.
+
+## What is an MCP server?
+
+An MCP server is an application that exposes tools and resources to the Gemini CLI through the Model Context Protocol, allowing it to interact with external systems and data sources. MCP servers act as a bridge between the Gemini model and your local environment or other services like APIs.
+
+An MCP server enables the Gemini CLI to:
+
+- **Discover tools:** List available tools, their descriptions, and parameters through standardized schema definitions.
+- **Execute tools:** Call specific tools with defined arguments and receive structured responses.
+- **Access resources:** Read data from specific resources (though the Gemini CLI primarily focuses on tool execution).
+
+With an MCP server, you can extend the Gemini CLI's capabilities to perform actions beyond its built-in features, such as interacting with databases, APIs, custom scripts, or specialized workflows.
+
+## Core Integration Architecture
+
+The Gemini CLI integrates with MCP servers through a sophisticated discovery and execution system built into the core package (`packages/core/src/tools/`):
+
+### Discovery Layer (`mcp-client.ts`)
+
+The discovery process is orchestrated by `discoverMcpTools()`, which:
+
+1. **Iterates through configured servers** from your `settings.json` `mcpServers` configuration
+2. **Establishes connections** using appropriate transport mechanisms (Stdio, SSE, or Streamable HTTP)
+3. **Fetches tool definitions** from each server using the MCP protocol
+4. **Sanitizes and validates** tool schemas for compatibility with the Gemini API
+5. **Registers tools** in the global tool registry with conflict resolution
+
+### Execution Layer (`mcp-tool.ts`)
+
+Each discovered MCP tool is wrapped in a `DiscoveredMCPTool` instance that:
+
+- **Handles confirmation logic** based on server trust settings and user preferences
+- **Manages tool execution** by calling the MCP server with proper parameters
+- **Processes responses** for both the LLM context and user display
+- **Maintains connection state** and handles timeouts
+
+### Transport Mechanisms
+
+The Gemini CLI supports three MCP transport types:
+
+- **Stdio Transport:** Spawns a subprocess and communicates via stdin/stdout
+- **SSE Transport:** Connects to Server-Sent Events endpoints
+- **Streamable HTTP Transport:** Uses HTTP streaming for communication
+
+## How to set up your MCP server
+
+The Gemini CLI uses the `mcpServers` configuration in your `settings.json` file to locate and connect to MCP servers. This configuration supports multiple servers with different transport mechanisms.
+
+### Configure the MCP server in settings.json
+
+You can configure MCP servers at the global level in the `~/.gemini/settings.json` file or in your project's root directory, create or open the `.gemini/settings.json` file. Within the file, add the `mcpServers` configuration block.
+
+### Configuration Structure
+
+Add an `mcpServers` object to your `settings.json` file:
+
+```json
+{ ...file contains other config objects
+  "mcpServers": {
+    "serverName": {
+      "command": "path/to/server",
+      "args": ["--arg1", "value1"],
+      "env": {
+        "API_KEY": "$MY_API_TOKEN"
+      },
+      "cwd": "./server-directory",
+      "timeout": 30000,
+      "trust": false
+    }
+  }
+}
+```
+
+### Configuration Properties
+
+Each server configuration supports the following properties:
+
+#### Required (one of the following)
+
+- **`command`** (string): Path to the executable for Stdio transport
+- **`url`** (string): SSE endpoint URL (e.g., `"http://localhost:8080/sse"`)
+- **`httpUrl`** (string): HTTP streaming endpoint URL
+
+#### Optional
+
+- **`args`** (string[]): Command-line arguments for Stdio transport
+- **`headers`** (object): Custom HTTP headers when using `httpUrl`
+- **`env`** (object): Environment variables for the server process. Values can reference environment variables using `$VAR_NAME` or `${VAR_NAME}` syntax
+- **`cwd`** (string): Working directory for Stdio transport
+- **`timeout`** (number): Request timeout in milliseconds (default: 600,000ms = 10 minutes)
+- **`trust`** (boolean): When `true`, bypasses all tool call confirmations for this server (default: `false`)
+
+### Example Configurations
+
+#### Python MCP Server (Stdio)
+
+```json
+{
+  "mcpServers": {
+    "pythonTools": {
+      "command": "python",
+      "args": ["-m", "my_mcp_server", "--port", "8080"],
+      "cwd": "./mcp-servers/python",
+      "env": {
+        "DATABASE_URL": "$DB_CONNECTION_STRING",
+        "API_KEY": "${EXTERNAL_API_KEY}"
+      },
+      "timeout": 15000
+    }
+  }
+}
+```
+
+#### Node.js MCP Server (Stdio)
+
+```json
+{
+  "mcpServers": {
+    "nodeServer": {
+      "command": "node",
+      "args": ["dist/server.js", "--verbose"],
+      "cwd": "./mcp-servers/node",
+      "trust": true
+    }
+  }
+}
+```
+
+#### Docker-based MCP Server
+
+```json
+{
+  "mcpServers": {
+    "dockerizedServer": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "API_KEY",
+        "-v",
+        "${PWD}:/workspace",
+        "my-mcp-server:latest"
+      ],
+      "env": {
+        "API_KEY": "$EXTERNAL_SERVICE_TOKEN"
+      }
+    }
+  }
+}
+```
+
+#### HTTP-based MCP Server
+
+```json
+{
+  "mcpServers": {
+    "httpServer": {
+      "httpUrl": "http://localhost:3000/mcp",
+      "timeout": 5000
+    }
+  }
+}
+```
+
+#### HTTP-based MCP Server with Custom Headers
+
+```json
+{
+  "mcpServers": {
+    "httpServerWithAuth": {
+      "httpUrl": "http://localhost:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer your-api-token",
+        "X-Custom-Header": "custom-value",
+        "Content-Type": "application/json"
+      },
+      "timeout": 5000
+    }
+  }
+}
+```
+
+## Discovery Process Deep Dive
+
+When the Gemini CLI starts, it performs MCP server discovery through the following detailed process:
+
+### 1. Server Iteration and Connection
+
+For each configured server in `mcpServers`:
+
+1. **Status tracking begins:** Server status is set to `CONNECTING`
+2. **Transport selection:** Based on configuration properties:
+   - `httpUrl` → `StreamableHTTPClientTransport`
+   - `url` → `SSEClientTransport`
+   - `command` → `StdioClientTransport`
+3. **Connection establishment:** The MCP client attempts to connect with the configured timeout
+4. **Error handling:** Connection failures are logged and the server status is set to `DISCONNECTED`
+
+### 2. Tool Discovery
+
+Upon successful connection:
+
+1. **Tool listing:** The client calls the MCP server's tool listing endpoint
+2. **Schema validation:** Each tool's function declaration is validated
+3. **Name sanitization:** Tool names are cleaned to meet Gemini API requirements:
+   - Invalid characters (non-alphanumeric, underscore, dot, hyphen) are replaced with underscores
+   - Names longer than 63 characters are truncated with middle replacement (`___`)
+
+### 3. Conflict Resolution
+
+When multiple servers expose tools with the same name:
+
+1. **First registration wins:** The first server to register a tool name gets the unprefixed name
+2. **Automatic prefixing:** Subsequent servers get prefixed names: `serverName__toolName`
+3. **Registry tracking:** The tool registry maintains mappings between server names and their tools
+
+### 4. Schema Processing
+
+Tool parameter schemas undergo sanitization for Gemini API compatibility:
+
+- **`$schema` properties** are removed
+- **`additionalProperties`** are stripped
+- **`anyOf` with `default`** have their default values removed (Vertex AI compatibility)
+- **Recursive processing** applies to nested schemas
+
+### 5. Connection Management
+
+After discovery:
+
+- **Persistent connections:** Servers that successfully register tools maintain their connections
+- **Cleanup:** Servers that provide no usable tools have their connections closed
+- **Status updates:** Final server statuses are set to `CONNECTED` or `DISCONNECTED`
+
+## Tool Execution Flow
+
+When the Gemini model decides to use an MCP tool, the following execution flow occurs:
+
+### 1. Tool Invocation
+
+The model generates a `FunctionCall` with:
+
+- **Tool name:** The registered name (potentially prefixed)
+- **Arguments:** JSON object matching the tool's parameter schema
+
+### 2. Confirmation Process
+
+Each `DiscoveredMCPTool` implements sophisticated confirmation logic:
+
+#### Trust-based Bypass
+
+```typescript
+if (this.trust) {
+  return false; // No confirmation needed
+}
+```
+
+#### Dynamic Allow-listing
+
+The system maintains internal allow-lists for:
+
+- **Server-level:** `serverName` → All tools from this server are trusted
+- **Tool-level:** `serverName.toolName` → This specific tool is trusted
+
+#### User Choice Handling
+
+When confirmation is required, users can choose:
+
+- **Proceed once:** Execute this time only
+- **Always allow this tool:** Add to tool-level allow-list
+- **Always allow this server:** Add to server-level allow-list
+- **Cancel:** Abort execution
+
+### 3. Execution
+
+Upon confirmation (or trust bypass):
+
+1. **Parameter preparation:** Arguments are validated against the tool's schema
+2. **MCP call:** The underlying `CallableTool` invokes the server with:
+
+   ```typescript
+   const functionCalls = [
+     {
+       name: this.serverToolName, // Original server tool name
+       args: params,
+     },
+   ];
+   ```
+
+3. **Response processing:** Results are formatted for both LLM context and user display
+
+### 4. Response Handling
+
+The execution result contains:
+
+- **`llmContent`:** Raw response parts for the language model's context
+- **`returnDisplay`:** Formatted output for user display (often JSON in markdown code blocks)
+
+## How to interact with your MCP server
+
+### Using the `/mcp` Command
+
+The `/mcp` command provides comprehensive information about your MCP server setup:
+
+```bash
+/mcp
+```
+
+This displays:
+
+- **Server list:** All configured MCP servers
+- **Connection status:** `CONNECTED`, `CONNECTING`, or `DISCONNECTED`
+- **Server details:** Configuration summary (excluding sensitive data)
+- **Available tools:** List of tools from each server with descriptions
+- **Discovery state:** Overall discovery process status
+
+### Example `/mcp` Output
+
+```
+MCP Servers Status:
+
+📡 pythonTools (CONNECTED)
+  Command: python -m my_mcp_server --port 8080
+  Working Directory: ./mcp-servers/python
+  Timeout: 15000ms
+  Tools: calculate_sum, file_analyzer, data_processor
+
+🔌 nodeServer (DISCONNECTED)
+  Command: node dist/server.js --verbose
+  Error: Connection refused
+
+🐳 dockerizedServer (CONNECTED)
+  Command: docker run -i --rm -e API_KEY my-mcp-server:latest
+  Tools: docker__deploy, docker__status
+
+Discovery State: COMPLETED
+```
+
+### Tool Usage
+
+Once discovered, MCP tools are available to the Gemini model like built-in tools. The model will automatically:
+
+1. **Select appropriate tools** based on your requests
+2. **Present confirmation dialogs** (unless the server is trusted)
+3. **Execute tools** with proper parameters
+4. **Display results** in a user-friendly format
+
+## Status Monitoring and Troubleshooting
+
+### Connection States
+
+The MCP integration tracks several states:
+
+#### Server Status (`MCPServerStatus`)
+
+- **`DISCONNECTED`:** Server is not connected or has errors
+- **`CONNECTING`:** Connection attempt in progress
+- **`CONNECTED`:** Server is connected and ready
+
+#### Discovery State (`MCPDiscoveryState`)
+
+- **`NOT_STARTED`:** Discovery hasn't begun
+- **`IN_PROGRESS`:** Currently discovering servers
+- **`COMPLETED`:** Discovery finished (with or without errors)
+
+### Common Issues and Solutions
+
+#### Server Won't Connect
+
+**Symptoms:** Server shows `DISCONNECTED` status
+
+**Troubleshooting:**
+
+1. **Check configuration:** Verify `command`, `args`, and `cwd` are correct
+2. **Test manually:** Run the server command directly to ensure it works
+3. **Check dependencies:** Ensure all required packages are installed
+4. **Review logs:** Look for error messages in the CLI output
+5. **Verify permissions:** Ensure the CLI can execute the server command
+
+#### No Tools Discovered
+
+**Symptoms:** Server connects but no tools are available
+
+**Troubleshooting:**
+
+1. **Verify tool registration:** Ensure your server actually registers tools
+2. **Check MCP protocol:** Confirm your server implements the MCP tool listing correctly
+3. **Review server logs:** Check stderr output for server-side errors
+4. **Test tool listing:** Manually test your server's tool discovery endpoint
+
+#### Tools Not Executing
+
+**Symptoms:** Tools are discovered but fail during execution
+
+**Troubleshooting:**
+
+1. **Parameter validation:** Ensure your tool accepts the expected parameters
+2. **Schema compatibility:** Verify your input schemas are valid JSON Schema
+3. **Error handling:** Check if your tool is throwing unhandled exceptions
+4. **Timeout issues:** Consider increasing the `timeout` setting
+
+#### Sandbox Compatibility
+
+**Symptoms:** MCP servers fail when sandboxing is enabled
+
+**Solutions:**
+
+1. **Docker-based servers:** Use Docker containers that include all dependencies
+2. **Path accessibility:** Ensure server executables are available in the sandbox
+3. **Network access:** Configure sandbox to allow necessary network connections
+4. **Environment variables:** Verify required environment variables are passed through
+
+### Debugging Tips
+
+1. **Enable debug mode:** Run the CLI with `--debug_mode` for verbose output
+2. **Check stderr:** MCP server stderr is captured and logged (INFO messages filtered)
+3. **Test isolation:** Test your MCP server independently before integrating
+4. **Incremental setup:** Start with simple tools before adding complex functionality
+5. **Use `/mcp` frequently:** Monitor server status during development
+
+## Important Notes
+
+### Security Considerations
+
+- **Trust settings:** The `trust` option bypasses all confirmation dialogs. Use cautiously and only for servers you completely control
+- **Access tokens:** Be security-aware when configuring environment variables containing API keys or tokens
+- **Sandbox compatibility:** When using sandboxing, ensure MCP servers are available within the sandbox environment
+- **Private data:** Using broadly scoped personal access tokens can lead to information leakage between repositories
+
+### Performance and Resource Management
+
+- **Connection persistence:** The CLI maintains persistent connections to servers that successfully register tools
+- **Automatic cleanup:** Connections to servers providing no tools are automatically closed
+- **Timeout management:** Configure appropriate timeouts based on your server's response characteristics
+- **Resource monitoring:** MCP servers run as separate processes and consume system resources
+
+### Schema Compatibility
+
+- **Property stripping:** The system automatically removes certain schema properties (`$schema`, `additionalProperties`) for Gemini API compatibility
+- **Name sanitization:** Tool names are automatically sanitized to meet API requirements
+- **Conflict resolution:** Tool name conflicts between servers are resolved through automatic prefixing
+
+This comprehensive integration makes MCP servers a powerful way to extend the Gemini CLI's capabilities while maintaining security, reliability, and ease of use.
+
+
+--- Content from: gemini-cli/docs/tools/shell.md ---
+
+# Shell Tool (`run_shell_command`)
+
+This document describes the `run_shell_command` tool for the Gemini CLI.
+
+## Description
+
+Use `run_shell_command` to interact with the underlying system, run scripts, or perform command-line operations. `run_shell_command` executes a given shell command. On Windows, the command will be executed with `cmd.exe /c`. On other platforms, the command will be executed with `bash -c`.
+
+### Arguments
+
+`run_shell_command` takes the following arguments:
+
+- `command` (string, required): The exact shell command to execute.
+- `description` (string, optional): A brief description of the command's purpose, which will be shown to the user.
+- `directory` (string, optional): The directory (relative to the project root) in which to execute the command. If not provided, the command runs in the project root.
+
+## How to use `run_shell_command` with the Gemini CLI
+
+When using `run_shell_command`, the command is executed as a subprocess. `run_shell_command` can start background processes using `&`. The tool returns detailed information about the execution, including:
+
+- `Command`: The command that was executed.
+- `Directory`: The directory where the command was run.
+- `Stdout`: Output from the standard output stream.
+- `Stderr`: Output from the standard error stream.
+- `Error`: Any error message reported by the subprocess.
+- `Exit Code`: The exit code of the command.
+- `Signal`: The signal number if the command was terminated by a signal.
+- `Background PIDs`: A list of PIDs for any background processes started.
+
+Usage:
+
+```
+run_shell_command(command="Your commands.", description="Your description of the command.", directory="Your execution directory.")
+```
+
+## `run_shell_command` examples
+
+List files in the current directory:
+
+```
+run_shell_command(command="ls -la")
+```
+
+Run a script in a specific directory:
+
+```
+run_shell_command(command="./my_script.sh", directory="scripts", description="Run my custom script")
+```
+
+Start a background server:
+
+```
+run_shell_command(command="npm run dev &", description="Start development server in background")
+```
+
+## Important notes
+
+- **Security:** Be cautious when executing commands, especially those constructed from user input, to prevent security vulnerabilities.
+- **Interactive commands:** Avoid commands that require interactive user input, as this can cause the tool to hang. Use non-interactive flags if available (e.g., `npm init -y`).
+- **Error handling:** Check the `Stderr`, `Error`, and `Exit Code` fields to determine if a command executed successfully.
+- **Background processes:** When a command is run in the background with `&`, the tool will return immediately and the process will continue to run in the background. The `Background PIDs` field will contain the process ID of the background process.
+
+## Command Restrictions
+
+You can restrict the commands that can be executed by the `run_shell_command` tool by using the `coreTools` and `excludeTools` settings in your configuration file.
+
+- `coreTools`: To restrict `run_shell_command` to a specific set of commands, add entries to the `coreTools` list in the format `run_shell_command(<command>)`. For example, `"coreTools": ["run_shell_command(git)"]` will only allow `git` commands. Including the generic `run_shell_command` acts as a wildcard, allowing any command not explicitly blocked.
+- `excludeTools`: To block specific commands, add entries to the `excludeTools` list in the format `run_shell_command(<command>)`. For example, `"excludeTools": ["run_shell_command(rm)"]` will block `rm` commands.
+
+The validation logic is designed to be secure and flexible:
+
+1.  **Command Chaining Disabled**: The tool automatically splits commands chained with `&&`, `||`, or `;` and validates each part separately. If any part of the chain is disallowed, the entire command is blocked.
+2.  **Prefix Matching**: The tool uses prefix matching. For example, if you allow `git`, you can run `git status` or `git log`.
+3.  **Blocklist Precedence**: The `excludeTools` list is always checked first. If a command matches a blocked prefix, it will be denied, even if it also matches an allowed prefix in `coreTools`.
+
+### Command Restriction Examples
+
+**Allow only specific command prefixes**
+
+To allow only `git` and `npm` commands, and block all others:
+
+```json
+{
+  "coreTools": ["run_shell_command(git)", "run_shell_command(npm)"]
+}
+```
+
+- `git status`: Allowed
+- `npm install`: Allowed
+- `ls -l`: Blocked
+
+**Block specific command prefixes**
+
+To block `rm` and allow all other commands:
+
+```json
+{
+  "coreTools": ["run_shell_command"],
+  "excludeTools": ["run_shell_command(rm)"]
+}
+```
+
+- `rm -rf /`: Blocked
+- `git status`: Allowed
+- `npm install`: Allowed
+
+**Blocklist takes precedence**
+
+If a command prefix is in both `coreTools` and `excludeTools`, it will be blocked.
+
+```json
+{
+  "coreTools": ["run_shell_command(git)"],
+  "excludeTools": ["run_shell_command(git push)"]
+}
+```
+
+- `git push origin main`: Blocked
+- `git status`: Allowed
+
+**Block all shell commands**
+
+To block all shell commands, add the `run_shell_command` wildcard to `excludeTools`:
+
+```json
+{
+  "excludeTools": ["run_shell_command"]
+}
+```
+
+- `ls -l`: Blocked
+- `any other command`: Blocked
+
+## Security Note for `excludeTools`
+
+Command-specific restrictions in
+`excludeTools` for `run_shell_command` are based on simple string matching and can be easily bypassed. This feature is **not a security mechanism** and should not be relied upon to safely execute untrusted code. It is recommended to use `coreTools` to explicitly select commands
+that can be executed.
+
+
+--- Content from: gemini-cli/docs/tools/memory.md ---
+
+# Memory Tool (`save_memory`)
+
+This document describes the `save_memory` tool for the Gemini CLI.
+
+## Description
+
+Use `save_memory` to save and recall information across your Gemini CLI sessions. With `save_memory`, you can direct the CLI to remember key details across sessions, providing personalized and directed assistance.
+
+### Arguments
+
+`save_memory` takes one argument:
+
+- `fact` (string, required): The specific fact or piece of information to remember. This should be a clear, self-contained statement written in natural language.
+
+## How to use `save_memory` with the Gemini CLI
+
+The tool appends the provided `fact` to a special `GEMINI.md` file located in the user's home directory (`~/.gemini/GEMINI.md`). This file can be configured to have a different name.
+
+Once added, the facts are stored under a `## Gemini Added Memories` section. This file is loaded as context in subsequent sessions, allowing the CLI to recall the saved information.
+
+Usage:
+
+```
+save_memory(fact="Your fact here.")
+```
+
+### `save_memory` examples
+
+Remember a user preference:
+
+```
+save_memory(fact="My preferred programming language is Python.")
+```
+
+Store a project-specific detail:
+
+```
+save_memory(fact="The project I'm currently working on is called 'gemini-cli'.")
+```
+
+## Important notes
+
+- **General usage:** This tool should be used for concise, important facts. It is not intended for storing large amounts of data or conversational history.
+- **Memory file:** The memory file is a plain text Markdown file, so you can view and edit it manually if needed.
+
+
+--- Content from: gemini-cli/docs/tools/multi-file.md ---
+
+# Multi File Read Tool (`read_many_files`)
+
+This document describes the `read_many_files` tool for the Gemini CLI.
+
+## Description
+
+Use `read_many_files` to read content from multiple files specified by paths or glob patterns. The behavior of this tool depends on the provided files:
+
+- For text files, this tool concatenates their content into a single string.
+- For image (e.g., PNG, JPEG) and PDF files, it reads and returns them as base64-encoded data, provided they are explicitly requested by name or extension.
+
+`read_many_files` can be used to perform tasks such as getting an overview of a codebase, finding where specific functionality is implemented, reviewing documentation, or gathering context from multiple configuration files.
+
+### Arguments
+
+`read_many_files` takes the following arguments:
+
+- `paths` (list[string], required): An array of glob patterns or paths relative to the tool's target directory (e.g., `["src/**/*.ts"]`, `["README.md", "docs/", "assets/logo.png"]`).
+- `exclude` (list[string], optional): Glob patterns for files/directories to exclude (e.g., `["**/*.log", "temp/"]`). These are added to default excludes if `useDefaultExcludes` is true.
+- `include` (list[string], optional): Additional glob patterns to include. These are merged with `paths` (e.g., `["*.test.ts"]` to specifically add test files if they were broadly excluded, or `["images/*.jpg"]` to include specific image types).
+- `recursive` (boolean, optional): Whether to search recursively. This is primarily controlled by `**` in glob patterns. Defaults to `true`.
+- `useDefaultExcludes` (boolean, optional): Whether to apply a list of default exclusion patterns (e.g., `node_modules`, `.git`, non image/pdf binary files). Defaults to `true`.
+- `respect_git_ignore` (boolean, optional): Whether to respect .gitignore patterns when finding files. Defaults to true.
+
+## How to use `read_many_files` with the Gemini CLI
+
+`read_many_files` searches for files matching the provided `paths` and `include` patterns, while respecting `exclude` patterns and default excludes (if enabled).
+
+- For text files: it reads the content of each matched file (attempting to skip binary files not explicitly requested as image/PDF) and concatenates it into a single string, with a separator `--- {filePath} ---` between the content of each file. Uses UTF-8 encoding by default.
+- For image and PDF files: if explicitly requested by name or extension (e.g., `paths: ["logo.png"]` or `include: ["*.pdf"]`), the tool reads the file and returns its content as a base64 encoded string.
+- The tool attempts to detect and skip other binary files (those not matching common image/PDF types or not explicitly requested) by checking for null bytes in their initial content.
+
+Usage:
+
+```
+read_many_files(paths=["Your files or paths here."], include=["Additional files to include."], exclude=["Files to exclude."], recursive=False, useDefaultExcludes=false, respect_git_ignore=true)
+```
+
+## `read_many_files` examples
+
+Read all TypeScript files in the `src` directory:
+
+```
+read_many_files(paths=["src/**/*.ts"])
+```
+
+Read the main README, all Markdown files in the `docs` directory, and a specific logo image, excluding a specific file:
+
+```
+read_many_files(paths=["README.md", "docs/**/*.md", "assets/logo.png"], exclude=["docs/OLD_README.md"])
+```
+
+Read all JavaScript files but explicitly including test files and all JPEGs in an `images` folder:
+
+```
+read_many_files(paths=["**/*.js"], include=["**/*.test.js", "images/**/*.jpg"], useDefaultExcludes=False)
+```
+
+## Important notes
+
+- **Binary file handling:**
+  - **Image/PDF files:** The tool can read common image types (PNG, JPEG, etc.) and PDF files, returning them as base64 encoded data. These files _must_ be explicitly targeted by the `paths` or `include` patterns (e.g., by specifying the exact filename like `image.png` or a pattern like `*.jpeg`).
+  - **Other binary files:** The tool attempts to detect and skip other types of binary files by examining their initial content for null bytes. The tool excludes these files from its output.
+- **Performance:** Reading a very large number of files or very large individual files can be resource-intensive.
+- **Path specificity:** Ensure paths and glob patterns are correctly specified relative to the tool's target directory. For image/PDF files, ensure the patterns are specific enough to include them.
+- **Default excludes:** Be aware of the default exclusion patterns (like `node_modules`, `.git`) and use `useDefaultExcludes=False` if you need to override them, but do so cautiously.
+
+
+--- Content from: gemini-cli/docs/tools/index.md ---
+
+# Gemini CLI tools
+
+The Gemini CLI includes built-in tools that the Gemini model uses to interact with your local environment, access information, and perform actions. These tools enhance the CLI's capabilities, enabling it to go beyond text generation and assist with a wide range of tasks.
+
+## Overview of Gemini CLI tools
+
+In the context of the Gemini CLI, tools are specific functions or modules that the Gemini model can request to be executed. For example, if you ask Gemini to "Summarize the contents of `my_document.txt`," the model will likely identify the need to read that file and will request the execution of the `read_file` tool.
+
+The core component (`packages/core`) manages these tools, presents their definitions (schemas) to the Gemini model, executes them when requested, and returns the results to the model for further processing into a user-facing response.
+
+These tools provide the following capabilities:
+
+- **Access local information:** Tools allow Gemini to access your local file system, read file contents, list directories, etc.
+- **Execute commands:** With tools like `run_shell_command`, Gemini can run shell commands (with appropriate safety measures and user confirmation).
+- **Interact with the web:** Tools can fetch content from URLs.
+- **Take actions:** Tools can modify files, write new files, or perform other actions on your system (again, typically with safeguards).
+- **Ground responses:** By using tools to fetch real-time or specific local data, Gemini's responses can be more accurate, relevant, and grounded in your actual context.
+
+## How to use Gemini CLI tools
+
+To use Gemini CLI tools, provide a prompt to the Gemini CLI. The process works as follows:
+
+1.  You provide a prompt to the Gemini CLI.
+2.  The CLI sends the prompt to the core.
+3.  The core, along with your prompt and conversation history, sends a list of available tools and their descriptions/schemas to the Gemini API.
+4.  The Gemini model analyzes your request. If it determines that a tool is needed, its response will include a request to execute a specific tool with certain parameters.
+5.  The core receives this tool request, validates it, and (often after user confirmation for sensitive operations) executes the tool.
+6.  The output from the tool is sent back to the Gemini model.
+7.  The Gemini model uses the tool's output to formulate its final answer, which is then sent back through the core to the CLI and displayed to you.
+
+You will typically see messages in the CLI indicating when a tool is being called and whether it succeeded or failed.
+
+## Security and confirmation
+
+Many tools, especially those that can modify your file system or execute commands (`write_file`, `edit`, `run_shell_command`), are designed with safety in mind. The Gemini CLI will typically:
+
+- **Require confirmation:** Prompt you before executing potentially sensitive operations, showing you what action is about to be taken.
+- **Utilize sandboxing:** All tools are subject to restrictions enforced by sandboxing (see [Sandboxing in the Gemini CLI](../sandbox.md)). This means that when operating in a sandbox, any tools (including MCP servers) you wish to use must be available _inside_ the sandbox environment. For example, to run an MCP server through `npx`, the `npx` executable must be installed within the sandbox's Docker image or be available in the `sandbox-exec` environment.
+
+It's important to always review confirmation prompts carefully before allowing a tool to proceed.
+
+## Learn more about Gemini CLI's tools
+
+Gemini CLI's built-in tools can be broadly categorized as follows:
+
+- **[File System Tools](./file-system.md):** For interacting with files and directories (reading, writing, listing, searching, etc.).
+- **[Shell Tool](./shell.md) (`run_shell_command`):** For executing shell commands.
+- **[Web Fetch Tool](./web-fetch.md) (`web_fetch`):** For retrieving content from URLs.
+- **[Web Search Tool](./web-search.md) (`web_search`):** For searching the web.
+- **[Multi-File Read Tool](./multi-file.md) (`read_many_files`):** A specialized tool for reading content from multiple files or directories, often used by the `@` command.
+- **[Memory Tool](./memory.md) (`save_memory`):** For saving and recalling information across sessions.
+
+Additionally, these tools incorporate:
+
+- **[MCP servers](./mcp-server.md)**: MCP servers act as a bridge between the Gemini model and your local environment or other services like APIs.
+- **[Sandboxing](../sandbox.md)**: Sandboxing isolates the model and its changes from your environment to reduce potential risk.
+
+
+--- Content from: gemini-cli/docs/tools/web-fetch.md ---
+
+# Web Fetch Tool (`web_fetch`)
+
+This document describes the `web_fetch` tool for the Gemini CLI.
+
+## Description
+
+Use `web_fetch` to summarize, compare, or extract information from web pages. The `web_fetch` tool processes content from one or more URLs (up to 20) embedded in a prompt. `web_fetch` takes a natural language prompt and returns a generated response.
+
+### Arguments
+
+`web_fetch` takes one argument:
+
+- `prompt` (string, required): A comprehensive prompt that includes the URL(s) (up to 20) to fetch and specific instructions on how to process their content. For example: `"Summarize https://example.com/article and extract key points from https://another.com/data"`. The prompt must contain at least one URL starting with `http://` or `https://`.
+
+## How to use `web_fetch` with the Gemini CLI
+
+To use `web_fetch` with the Gemini CLI, provide a natural language prompt that contains URLs. The tool will ask for confirmation before fetching any URLs. Once confirmed, the tool will process URLs through Gemini API's `urlContext`.
+
+If the Gemini API cannot access the URL, the tool will fall back to fetching content directly from the local machine. The tool will format the response, including source attribution and citations where possible. The tool will then provide the response to the user.
+
+Usage:
+
+```
+web_fetch(prompt="Your prompt, including a URL such as https://google.com.")
+```
+
+## `web_fetch` examples
+
+Summarize a single article:
+
+```
+web_fetch(prompt="Can you summarize the main points of https://example.com/news/latest")
+```
+
+Compare two articles:
+
+```
+web_fetch(prompt="What are the differences in the conclusions of these two papers: https://arxiv.org/abs/2401.0001 and https://arxiv.org/abs/2401.0002?")
+```
+
+## Important notes
+
+- **URL processing:** `web_fetch` relies on the Gemini API's ability to access and process the given URLs.
+- **Output quality:** The quality of the output will depend on the clarity of the instructions in the prompt.
+
+
+--- Content from: gemini-cli/docs/tools/file-system.md ---
+
+# Gemini CLI file system tools
+
+The Gemini CLI provides a comprehensive suite of tools for interacting with the local file system. These tools allow the Gemini model to read from, write to, list, search, and modify files and directories, all under your control and typically with confirmation for sensitive operations.
+
+**Note:** All file system tools operate within a `rootDirectory` (usually the current working directory where you launched the CLI) for security. Paths that you provide to these tools are generally expected to be absolute or are resolved relative to this root directory.
+
+## 1. `list_directory` (ReadFolder)
+
+`list_directory` lists the names of files and subdirectories directly within a specified directory path. It can optionally ignore entries matching provided glob patterns.
+
+- **Tool name:** `list_directory`
+- **Display name:** ReadFolder
+- **File:** `ls.ts`
+- **Parameters:**
+  - `path` (string, required): The absolute path to the directory to list.
+  - `ignore` (array of strings, optional): A list of glob patterns to exclude from the listing (e.g., `["*.log", ".git"]`).
+  - `respect_git_ignore` (boolean, optional): Whether to respect `.gitignore` patterns when listing files. Defaults to `true`.
+- **Behavior:**
+  - Returns a list of file and directory names.
+  - Indicates whether each entry is a directory.
+  - Sorts entries with directories first, then alphabetically.
+- **Output (`llmContent`):** A string like: `Directory listing for /path/to/your/folder:\n[DIR] subfolder1\nfile1.txt\nfile2.png`
+- **Confirmation:** No.
+
+## 2. `read_file` (ReadFile)
+
+`read_file` reads and returns the content of a specified file. This tool handles text, images (PNG, JPG, GIF, WEBP, SVG, BMP), and PDF files. For text files, it can read specific line ranges. Other binary file types are generally skipped.
+
+- **Tool name:** `read_file`
+- **Display name:** ReadFile
+- **File:** `read-file.ts`
+- **Parameters:**
+  - `path` (string, required): The absolute path to the file to read.
+  - `offset` (number, optional): For text files, the 0-based line number to start reading from. Requires `limit` to be set.
+  - `limit` (number, optional): For text files, the maximum number of lines to read. If omitted, reads a default maximum (e.g., 2000 lines) or the entire file if feasible.
+- **Behavior:**
+  - For text files: Returns the content. If `offset` and `limit` are used, returns only that slice of lines. Indicates if content was truncated due to line limits or line length limits.
+  - For image and PDF files: Returns the file content as a base64-encoded data structure suitable for model consumption.
+  - For other binary files: Attempts to identify and skip them, returning a message indicating it's a generic binary file.
+- **Output:** (`llmContent`):
+  - For text files: The file content, potentially prefixed with a truncation message (e.g., `[File content truncated: showing lines 1-100 of 500 total lines...]\nActual file content...`).
+  - For image/PDF files: An object containing `inlineData` with `mimeType` and base64 `data` (e.g., `{ inlineData: { mimeType: 'image/png', data: 'base64encodedstring' } }`).
+  - For other binary files: A message like `Cannot display content of binary file: /path/to/data.bin`.
+- **Confirmation:** No.
+
+## 3. `write_file` (WriteFile)
+
+`write_file` writes content to a specified file. If the file exists, it will be overwritten. If the file doesn't exist, it (and any necessary parent directories) will be created.
+
+- **Tool name:** `write_file`
+- **Display name:** WriteFile
+- **File:** `write-file.ts`
+- **Parameters:**
+  - `file_path` (string, required): The absolute path to the file to write to.
+  - `content` (string, required): The content to write into the file.
+- **Behavior:**
+  - Writes the provided `content` to the `file_path`.
+  - Creates parent directories if they don't exist.
+- **Output (`llmContent`):** A success message, e.g., `Successfully overwrote file: /path/to/your/file.txt` or `Successfully created and wrote to new file: /path/to/new/file.txt`.
+- **Confirmation:** Yes. Shows a diff of changes and asks for user approval before writing.
+
+## 4. `glob` (FindFiles)
+
+`glob` finds files matching specific glob patterns (e.g., `src/**/*.ts`, `*.md`), returning absolute paths sorted by modification time (newest first).
+
+- **Tool name:** `glob`
+- **Display name:** FindFiles
+- **File:** `glob.ts`
+- **Parameters:**
+  - `pattern` (string, required): The glob pattern to match against (e.g., `"*.py"`, `"src/**/*.js"`).
+  - `path` (string, optional): The absolute path to the directory to search within. If omitted, searches the tool's root directory.
+  - `case_sensitive` (boolean, optional): Whether the search should be case-sensitive. Defaults to `false`.
+  - `respect_git_ignore` (boolean, optional): Whether to respect .gitignore patterns when finding files. Defaults to `true`.
+- **Behavior:**
+  - Searches for files matching the glob pattern within the specified directory.
+  - Returns a list of absolute paths, sorted with the most recently modified files first.
+  - Ignores common nuisance directories like `node_modules` and `.git` by default.
+- **Output (`llmContent`):** A message like: `Found 5 file(s) matching "*.ts" within src, sorted by modification time (newest first):\nsrc/file1.ts\nsrc/subdir/file2.ts...`
+- **Confirmation:** No.
+
+## 5. `search_file_content` (SearchText)
+
+`search_file_content` searches for a regular expression pattern within the content of files in a specified directory. Can filter files by a glob pattern. Returns the lines containing matches, along with their file paths and line numbers.
+
+- **Tool name:** `search_file_content`
+- **Display name:** SearchText
+- **File:** `grep.ts`
+- **Parameters:**
+  - `pattern` (string, required): The regular expression (regex) to search for (e.g., `"function\s+myFunction"`).
+  - `path` (string, optional): The absolute path to the directory to search within. Defaults to the current working directory.
+  - `include` (string, optional): A glob pattern to filter which files are searched (e.g., `"*.js"`, `"src/**/*.{ts,tsx}"`). If omitted, searches most files (respecting common ignores).
+- **Behavior:**
+  - Uses `git grep` if available in a Git repository for speed, otherwise falls back to system `grep` or a JavaScript-based search.
+  - Returns a list of matching lines, each prefixed with its file path (relative to the search directory) and line number.
+- **Output (`llmContent`):** A formatted string of matches, e.g.:
+  ```
+  Found 3 matches for pattern "myFunction" in path "." (filter: "*.ts"):
+  ---
+  File: src/utils.ts
+  L15: export function myFunction() {
+  L22:   myFunction.call();
+  ---
+  File: src/index.ts
+  L5: import { myFunction } from './utils';
+  ---
+  ```
+- **Confirmation:** No.
+
+## 6. `replace` (Edit)
+
+`replace` replaces text within a file. By default, replaces a single occurrence, but can replace multiple occurrences when `expected_replacements` is specified. This tool is designed for precise, targeted changes and requires significant context around the `old_string` to ensure it modifies the correct location.
+
+- **Tool name:** `replace`
+- **Display name:** Edit
+- **File:** `edit.ts`
+- **Parameters:**
+  - `file_path` (string, required): The absolute path to the file to modify.
+  - `old_string` (string, required): The exact literal text to replace.
+
+    **CRITICAL:** This string must uniquely identify the single instance to change. It should include at least 3 lines of context _before_ and _after_ the target text, matching whitespace and indentation precisely. If `old_string` is empty, the tool attempts to create a new file at `file_path` with `new_string` as content.
+
+  - `new_string` (string, required): The exact literal text to replace `old_string` with.
+  - `expected_replacements` (number, optional): The number of occurrences to replace. Defaults to `1`.
+
+- **Behavior:**
+  - If `old_string` is empty and `file_path` does not exist, creates a new file with `new_string` as content.
+  - If `old_string` is provided, it reads the `file_path` and attempts to find exactly one occurrence of `old_string`.
+  - If one occurrence is found, it replaces it with `new_string`.
+  - **Enhanced Reliability (Multi-Stage Edit Correction):** To significantly improve the success rate of edits, especially when the model-provided `old_string` might not be perfectly precise, the tool incorporates a multi-stage edit correction mechanism.
+    - If the initial `old_string` isn't found or matches multiple locations, the tool can leverage the Gemini model to iteratively refine `old_string` (and potentially `new_string`).
+    - This self-correction process attempts to identify the unique segment the model intended to modify, making the `replace` operation more robust even with slightly imperfect initial context.
+- **Failure conditions:** Despite the correction mechanism, the tool will fail if:
+  - `file_path` is not absolute or is outside the root directory.
+  - `old_string` is not empty, but the `file_path` does not exist.
+  - `old_string` is empty, but the `file_path` already exists.
+  - `old_string` is not found in the file after attempts to correct it.
+  - `old_string` is found multiple times, and the self-correction mechanism cannot resolve it to a single, unambiguous match.
+- **Output (`llmContent`):**
+  - On success: `Successfully modified file: /path/to/file.txt (1 replacements).` or `Created new file: /path/to/new_file.txt with provided content.`
+  - On failure: An error message explaining the reason (e.g., `Failed to edit, 0 occurrences found...`, `Failed to edit, expected 1 occurrences but found 2...`).
+- **Confirmation:** Yes. Shows a diff of the proposed changes and asks for user approval before writing to the file.
+
+These file system tools provide a foundation for the Gemini CLI to understand and interact with your local project context.
+
+
+--- Content from: gemini-cli/docs/core/memport.md ---
+
+# Memory Import Processor
+
+The Memory Import Processor is a feature that allows you to modularize your GEMINI.md files by importing content from other markdown files using the `@file.md` syntax.
+
+## Overview
+
+This feature enables you to break down large GEMINI.md files into smaller, more manageable components that can be reused across different contexts. The import processor supports both relative and absolute paths, with built-in safety features to prevent circular imports and ensure file access security.
+
+## Important Limitations
+
+**This feature only supports `.md` (markdown) files.** Attempting to import files with other extensions (like `.txt`, `.json`, etc.) will result in a warning and the import will fail.
+
+## Syntax
+
+Use the `@` symbol followed by the path to the markdown file you want to import:
+
+```markdown
+# Main GEMINI.md file
+
+This is the main content.
+
+@./components/instructions.md
+
+More content here.
+
+@./shared/configuration.md
+```
+
+## Supported Path Formats
+
+### Relative Paths
+
+- `@./file.md` - Import from the same directory
+- `@../file.md` - Import from parent directory
+- `@./components/file.md` - Import from subdirectory
+
+### Absolute Paths
+
+- `@/absolute/path/to/file.md` - Import using absolute path
+
+## Examples
+
+### Basic Import
+
+```markdown
+# My GEMINI.md
+
+Welcome to my project!
+
+@./getting-started.md
+
+## Features
+
+@./features/overview.md
+```
+
+### Nested Imports
+
+The imported files can themselves contain imports, creating a nested structure:
+
+```markdown
+# main.md
+
+@./header.md
+@./content.md
+@./footer.md
+```
+
+```markdown
+# header.md
+
+# Project Header
+
+@./shared/title.md
+```
+
+## Safety Features
+
+### Circular Import Detection
+
+The processor automatically detects and prevents circular imports:
+
+```markdown
+# file-a.md
+
+@./file-b.md
+
+# file-b.md
+
+@./file-a.md <!-- This will be detected and prevented -->
+```
+
+### File Access Security
+
+The `validateImportPath` function ensures that imports are only allowed from specified directories, preventing access to sensitive files outside the allowed scope.
+
+### Maximum Import Depth
+
+To prevent infinite recursion, there's a configurable maximum import depth (default: 10 levels).
+
+## Error Handling
+
+### Non-MD File Attempts
+
+If you try to import a non-markdown file, you'll see a warning:
+
+```markdown
+@./instructions.txt <!-- This will show a warning and fail -->
+```
+
+Console output:
+
+```
+[WARN] [ImportProcessor] Import processor only supports .md files. Attempting to import non-md file: ./instructions.txt. This will fail.
+```
+
+### Missing Files
+
+If a referenced file doesn't exist, the import will fail gracefully with an error comment in the output.
+
+### File Access Errors
+
+Permission issues or other file system errors are handled gracefully with appropriate error messages.
+
+## API Reference
+
+### `processImports(content, basePath, debugMode?, importState?)`
+
+Processes import statements in GEMINI.md content.
+
+**Parameters:**
+
+- `content` (string): The content to process for imports
+- `basePath` (string): The directory path where the current file is located
+- `debugMode` (boolean, optional): Whether to enable debug logging (default: false)
+- `importState` (ImportState, optional): State tracking for circular import prevention
+
+**Returns:** Promise<string> - Processed content with imports resolved
+
+### `validateImportPath(importPath, basePath, allowedDirectories)`
+
+Validates import paths to ensure they are safe and within allowed directories.
+
+**Parameters:**
+
+- `importPath` (string): The import path to validate
+- `basePath` (string): The base directory for resolving relative paths
+- `allowedDirectories` (string[]): Array of allowed directory paths
+
+**Returns:** boolean - Whether the import path is valid
+
+## Best Practices
+
+1. **Use descriptive file names** for imported components
+2. **Keep imports shallow** - avoid deeply nested import chains
+3. **Document your structure** - maintain a clear hierarchy of imported files
+4. **Test your imports** - ensure all referenced files exist and are accessible
+5. **Use relative paths** when possible for better portability
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Import not working**: Check that the file exists and has a `.md` extension
+2. **Circular import warnings**: Review your import structure for circular references
+3. **Permission errors**: Ensure the files are readable and within allowed directories
+4. **Path resolution issues**: Use absolute paths if relative paths aren't resolving correctly
+
+### Debug Mode
+
+Enable debug mode to see detailed logging of the import process:
+
+```typescript
+const result = await processImports(content, basePath, true);
+```
+
+
+--- Content from: gemini-cli/docs/core/index.md ---
+
+# Gemini CLI Core
+
+Gemini CLI's core package (`packages/core`) is the backend portion of Gemini CLI, handling communication with the Gemini API, managing tools, and processing requests sent from `packages/cli`. For a general overview of Gemini CLI, see the [main documentation page](../index.md).
+
+## Navigating this section
+
+- **[Core tools API](./tools-api.md):** Information on how tools are defined, registered, and used by the core.
+- **[Memory Import Processor](./memport.md):** Documentation for the modular GEMINI.md import feature using @file.md syntax.
+
+## Role of the core
+
+While the `packages/cli` portion of Gemini CLI provides the user interface, `packages/core` is responsible for:
+
+- **Gemini API interaction:** Securely communicating with the Google Gemini API, sending user prompts, and receiving model responses.
+- **Prompt engineering:** Constructing effective prompts for the Gemini model, potentially incorporating conversation history, tool definitions, and instructional context from `GEMINI.md` files.
+- **Tool management & orchestration:**
+  - Registering available tools (e.g., file system tools, shell command execution).
+  - Interpreting tool use requests from the Gemini model.
+  - Executing the requested tools with the provided arguments.
+  - Returning tool execution results to the Gemini model for further processing.
+- **Session and state management:** Keeping track of the conversation state, including history and any relevant context required for coherent interactions.
+- **Configuration:** Managing core-specific configurations, such as API key access, model selection, and tool settings.
+
+## Security considerations
+
+The core plays a vital role in security:
+
+- **API key management:** It handles the `GEMINI_API_KEY` and ensures it's used securely when communicating with the Gemini API.
+- **Tool execution:** When tools interact with the local system (e.g., `run_shell_command`), the core (and its underlying tool implementations) must do so with appropriate caution, often involving sandboxing mechanisms to prevent unintended modifications.
+
+## Chat history compression
+
+To ensure that long conversations don't exceed the token limits of the Gemini model, the core includes a chat history compression feature.
+
+When a conversation approaches the token limit for the configured model, the core automatically compresses the conversation history before sending it to the model. This compression is designed to be lossless in terms of the information conveyed, but it reduces the overall number of tokens used.
+
+You can find the token limits for each model in the [Google AI documentation](https://ai.google.dev/gemini-api/docs/models).
+
+## Model fallback
+
+Gemini CLI includes a model fallback mechanism to ensure that you can continue to use the CLI even if the default "pro" model is rate-limited.
+
+If you are using the default "pro" model and the CLI detects that you are being rate-limited, it automatically switches to the "flash" model for the current session. This allows you to continue working without interruption.
+
+## File discovery service
+
+The file discovery service is responsible for finding files in the project that are relevant to the current context. It is used by the `@` command and other tools that need to access files.
+
+## Memory discovery service
+
+The memory discovery service is responsible for finding and loading the `GEMINI.md` files that provide context to the model. It searches for these files in a hierarchical manner, starting from the current working directory and moving up to the project root and the user's home directory. It also searches in subdirectories.
+
+This allows you to have global, project-level, and component-level context files, which are all combined to provide the model with the most relevant information.
+
+You can use the [`/memory` command](../cli/commands.md) to `show`, `add`, and `refresh` the content of loaded `GEMINI.md` files.
+
+
+--- Content from: gemini-cli/docs/core/tools-api.md ---
+
+# Gemini CLI Core: Tools API
+
+The Gemini CLI core (`packages/core`) features a robust system for defining, registering, and executing tools. These tools extend the capabilities of the Gemini model, allowing it to interact with the local environment, fetch web content, and perform various actions beyond simple text generation.
+
+## Core Concepts
+
+- **Tool (`tools.ts`):** An interface and base class (`BaseTool`) that defines the contract for all tools. Each tool must have:
+  - `name`: A unique internal name (used in API calls to Gemini).
+  - `displayName`: A user-friendly name.
+  - `description`: A clear explanation of what the tool does, which is provided to the Gemini model.
+  - `parameterSchema`: A JSON schema defining the parameters the tool accepts. This is crucial for the Gemini model to understand how to call the tool correctly.
+  - `validateToolParams()`: A method to validate incoming parameters.
+  - `getDescription()`: A method to provide a human-readable description of what the tool will do with specific parameters before execution.
+  - `shouldConfirmExecute()`: A method to determine if user confirmation is required before execution (e.g., for potentially destructive operations).
+  - `execute()`: The core method that performs the tool's action and returns a `ToolResult`.
+
+- **`ToolResult` (`tools.ts`):** An interface defining the structure of a tool's execution outcome:
+  - `llmContent`: The factual string content to be included in the history sent back to the LLM for context.
+  - `returnDisplay`: A user-friendly string (often Markdown) or a special object (like `FileDiff`) for display in the CLI.
+
+- **Tool Registry (`tool-registry.ts`):** A class (`ToolRegistry`) responsible for:
+  - **Registering Tools:** Holding a collection of all available built-in tools (e.g., `ReadFileTool`, `ShellTool`).
+  - **Discovering Tools:** It can also discover tools dynamically:
+    - **Command-based Discovery:** If `toolDiscoveryCommand` is configured in settings, this command is executed. It's expected to output JSON describing custom tools, which are then registered as `DiscoveredTool` instances.
+    - **MCP-based Discovery:** If `mcpServerCommand` is configured, the registry can connect to a Model Context Protocol (MCP) server to list and register tools (`DiscoveredMCPTool`).
+  - **Providing Schemas:** Exposing the `FunctionDeclaration` schemas of all registered tools to the Gemini model, so it knows what tools are available and how to use them.
+  - **Retrieving Tools:** Allowing the core to get a specific tool by name for execution.
+
+## Built-in Tools
+
+The core comes with a suite of pre-defined tools, typically found in `packages/core/src/tools/`. These include:
+
+- **File System Tools:**
+  - `LSTool` (`ls.ts`): Lists directory contents.
+  - `ReadFileTool` (`read-file.ts`): Reads the content of a single file. It takes an `absolute_path` parameter, which must be an absolute path.
+  - `WriteFileTool` (`write-file.ts`): Writes content to a file.
+  - `GrepTool` (`grep.ts`): Searches for patterns in files.
+  - `GlobTool` (`glob.ts`): Finds files matching glob patterns.
+  - `EditTool` (`edit.ts`): Performs in-place modifications to files (often requiring confirmation).
+  - `ReadManyFilesTool` (`read-many-files.ts`): Reads and concatenates content from multiple files or glob patterns (used by the `@` command in CLI).
+- **Execution Tools:**
+  - `ShellTool` (`shell.ts`): Executes arbitrary shell commands (requires careful sandboxing and user confirmation).
+- **Web Tools:**
+  - `WebFetchTool` (`web-fetch.ts`): Fetches content from a URL.
+  - `WebSearchTool` (`web-search.ts`): Performs a web search.
+- **Memory Tools:**
+  - `MemoryTool` (`memoryTool.ts`): Interacts with the AI's memory.
+
+Each of these tools extends `BaseTool` and implements the required methods for its specific functionality.
+
+## Tool Execution Flow
+
+1.  **Model Request:** The Gemini model, based on the user's prompt and the provided tool schemas, decides to use a tool and returns a `FunctionCall` part in its response, specifying the tool name and arguments.
+2.  **Core Receives Request:** The core parses this `FunctionCall`.
+3.  **Tool Retrieval:** It looks up the requested tool in the `ToolRegistry`.
+4.  **Parameter Validation:** The tool's `validateToolParams()` method is called.
+5.  **Confirmation (if needed):**
+    - The tool's `shouldConfirmExecute()` method is called.
+    - If it returns details for confirmation, the core communicates this back to the CLI, which prompts the user.
+    - The user's decision (e.g., proceed, cancel) is sent back to the core.
+6.  **Execution:** If validated and confirmed (or if no confirmation is needed), the core calls the tool's `execute()` method with the provided arguments and an `AbortSignal` (for potential cancellation).
+7.  **Result Processing:** The `ToolResult` from `execute()` is received by the core.
+8.  **Response to Model:** The `llmContent` from the `ToolResult` is packaged as a `FunctionResponse` and sent back to the Gemini model so it can continue generating a user-facing response.
+9.  **Display to User:** The `returnDisplay` from the `ToolResult` is sent to the CLI to show the user what the tool did.
+
+## Extending with Custom Tools
+
+While direct programmatic registration of new tools by users isn't explicitly detailed as a primary workflow in the provided files for typical end-users, the architecture supports extension through:
+
+- **Command-based Discovery:** Advanced users or project administrators can define a `toolDiscoveryCommand` in `settings.json`. This command, when run by the Gemini CLI core, should output a JSON array of `FunctionDeclaration` objects. The core will then make these available as `DiscoveredTool` instances. The corresponding `toolCallCommand` would then be responsible for actually executing these custom tools.
+- **MCP Server(s):** For more complex scenarios, one or more MCP servers can be set up and configured via the `mcpServers` setting in `settings.json`. The Gemini CLI core can then discover and use tools exposed by these servers. As mentioned, if you have multiple MCP servers, the tool names will be prefixed with the server name from your configuration (e.g., `serverAlias__actualToolName`).
+
+This tool system provides a flexible and powerful way to augment the Gemini model's capabilities, making the Gemini CLI a versatile assistant for a wide range of tasks.
