@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+.venv
+__pycache__
+*.pyc
+.cache
+indexes
+gemini-cli
+gemini_cli_documents*.jsonl
+gemini_cli_docs.txt
+gemini_cli_vectorstore.parquet

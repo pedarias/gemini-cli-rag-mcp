@@ -1,5 +1,7 @@
 sklearn_vectorstore.parquet
 llms_full.txt
+gemini_cli_documents*.jsonl
+/indexes/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

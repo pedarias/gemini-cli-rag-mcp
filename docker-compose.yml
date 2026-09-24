@@ -1,18 +1,27 @@
-version: '3.8'
-
 services:
   gemini-cli-mcp:
     build: .
     container_name: gemini-cli-mcp-container
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - RAG_MODEL=e5-small
+      - RAG_INDEX_DIR=/app/indexes/e5-small-v0.60.0
+      - RAG_THREADS=4
+      - HF_HUB_DISABLE_TELEMETRY=1
     volumes:
       # Mount the vector store data to persist across container restarts
-      - ./gemini_cli_vectorstore.parquet:/app/gemini_cli_vectorstore.parquet:ro
-      - ./gemini_cli_docs.txt:/app/gemini_cli_docs.txt:ro
+      - type: bind
+        source: ./indexes/e5-small-v0.60.0
+        target: /app/indexes/e5-small-v0.60.0
+        read_only: true
+        bind:
+          create_host_path: false
+      - model-cache:/root/.cache/huggingface
     stdin_open: true
     tty: true
     # For MCP stdio communication, we need to keep the container running
     # and handle I/O through docker exec
     command: ["tail", "-f", "/dev/null"]
     restart: unless-stopped
+
+volumes:
+  model-cache:
