@@ -1,0 +1,17 @@
+[
+  {"topic": "mcp", "source": "docs/tools/mcp-server.md", "pt": "Como conectar um servidor MCP local usando stdin e stdout?", "en": "How do I connect a local MCP server using stdin and stdout?"},
+  {"topic": "ignore", "source": "docs/cli/gemini-ignore.md", "pt": "Como impedir que o Gemini leia determinados arquivos e pastas?", "en": "How do I prevent Gemini from reading specific files and directories?"},
+  {"topic": "context", "source": "docs/cli/gemini-md.md", "pt": "Onde coloco instruções persistentes para um projeto e como funciona a hierarquia dos arquivos GEMINI.md?", "en": "Where do I put persistent project instructions and how does the GEMINI.md file hierarchy work?"},
+  {"topic": "memory", "source": "docs/tools/memory.md", "pt": "Como a ferramenta save_memory armazena uma preferência para conversas futuras?", "en": "How does the save_memory tool store a preference for future conversations?"},
+  {"topic": "headless", "source": "docs/cli/headless.md", "pt": "Como executar o Gemini sem interação e receber uma resposta em JSON?", "en": "How do I run Gemini non-interactively and get a JSON response?"},
+  {"topic": "extensions", "source": "docs/extensions/reference.md", "pt": "Quais comandos instalam, atualizam e desabilitam extensões?", "en": "Which commands install, update, and disable extensions?"},
+  {"topic": "hooks", "source": "docs/hooks/reference.md", "pt": "Como funciona o evento BeforeTool e qual é o formato de entrada e saída de um hook?", "en": "How does the BeforeTool event work and what are a hook's input and output formats?"},
+  {"topic": "skills", "source": "docs/cli/skills.md", "pt": "O que são Agent Skills e como são descobertas pelo Gemini CLI?", "en": "What are Agent Skills and how does Gemini CLI discover them?"},
+  {"topic": "sandbox", "source": "docs/cli/sandbox.md", "pt": "Como executar comandos em um ambiente isolado com sandbox?", "en": "How do I execute commands in an isolated sandbox environment?"},
+  {"topic": "checkpoint", "source": "docs/cli/checkpointing.md", "pt": "Como habilitar checkpoints e restaurar arquivos ao estado anterior a uma alteração?", "en": "How do I enable checkpoints and restore files to their state before a change?"},
+  {"topic": "sessions", "source": "docs/cli/session-management.md", "pt": "Como retomar uma conversa anterior e gerenciar o histórico de sessões?", "en": "How do I resume a previous conversation and manage session history?"},
+  {"topic": "models", "source": "docs/cli/model.md", "pt": "Como escolher qual modelo Gemini será usado na sessão?", "en": "How do I choose which Gemini model is used in my session?"},
+  {"topic": "authentication", "source": "docs/get-started/authentication.mdx", "pt": "Quais são as opções de autenticação e como usar uma chave de API?", "en": "What authentication options are available and how do I use an API key?"},
+  {"topic": "policies", "source": "docs/reference/policy-engine.md", "pt": "Como criar regras para permitir ou negar a execução de ferramentas?", "en": "How do I create rules to allow or deny tool execution?"},
+  {"topic": "settings", "source": "docs/reference/configuration.md", "pt": "Onde ficam os arquivos settings.json do usuário e do projeto e qual tem precedência?", "en": "Where are the user and project settings.json files and which takes precedence?"}
+]

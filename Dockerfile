@@ -15,13 +15,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements file first to leverage Docker layer caching
-COPY requirements.txt .
+COPY requirements.txt requirements.lock ./
 
 # Install CPU-only PyTorch. sentence-transformers requires it, and this is an optimization to keep the image size small.
-RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
 
 # Install the rest of the Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 # Copy the rest of your application code
 COPY . .

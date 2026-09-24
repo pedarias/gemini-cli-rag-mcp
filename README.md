@@ -1,190 +1,178 @@
 # Gemini CLI RAG MCP
 
-This project builds a standalone RAG service, transforming the static `gemini-cli` documentation into a dynamic and queryable tool. This tool exposes knowledge via a protocol (like MCP), making it accessible to any integrated client. Therefore, environments like gemini-cli, VS Code, or Cursor can provide developers with instant, accurate answers in natural language, directly within their workflow. Accelerating learning and letting you intuitively leverage the tool's full potential.
+A local MCP documentation search server. It extracts versioned official Gemini CLI documentation, generates local embeddings, and returns relevant passages with source URLs. The connected MCP client generates the final answer; this server does not call a generative model.
 
-## Table of Contents
+## Pipeline
 
-- [Project Overview](#project-overview)
-- [Features](#features)
-- [System Architecture](#system-architecture)
-- [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-- [Usage](#usage)
-  - [1. Run the MCP Service with Docker](#1-run-the-mcp-service-with-docker)
-  - [2. Configure Gemini CLI](#2-configure-gemini-cli)
-  - [3. Ask Questions](#3-ask-questions)
-- [How It Works](#how-it-works)
-  - [Data Extraction and Vectorization](#data-extraction-and-vectorization)
-  - [MCP Server](#mcp-server)
-  - [Gemini CLI Integration](#gemini-cli-integration)
-- [Scripts](#scripts)
-- [Dependencies](#dependencies)
+1. `extract.py` downloads an explicit official tag/commit, or reads a local docs directory. It selects user-facing `.md` and `.mdx` files and writes JSONL sections with provenance.
+2. `create_vectorstore.py` consumes that JSONL and builds a new model-specific index directory.
+3. `rag.py` shares pinned model configuration, token-aware chunking, input validation, and index compatibility checks between indexing and serving.
+4. `vector_store.py` stores vectors and metadata in Parquet and performs exact cosine-neighbor search with scikit-learn. LangChain is not required.
+5. `gemini_cli_mcp.py` exposes documentation search and a full-documentation resource over MCP stdio.
 
+The default embedding candidate is `intfloat/multilingual-e5-small` (384 dimensions). `BAAI/bge-large-en-v1.5` remains available as the `bge-large-en` comparison profile (1024 dimensions). Both use pinned model revisions and a maximum of 512 input tokens.
 
-## Project Overview
+## Requirements
 
-This project integrates a RAG pipeline and it consists of three main components:
+- Python 3.11+; local verification uses the Conda environment `project_env` with Python 3.11.
+- GitHub CLI (`gh`) with working authentication for official documentation downloads. Local extraction does not require it.
+- Internet access for the initial model download. Embedding inference runs locally on CPU.
+- Docker and Compose are optional. The Python server itself does not require Node.js or a Gemini CLI installation.
 
-1.  **Data Extraction and Processing**: Python scripts that extract content from all markdown files in the `gemini-cli/docs` directory and sub-directories, process it, and create a vector store.
-2.  **MCP Server**: A Python-based MCP server that exposes the vector store as a queryable tool.
-3.  **Gemini CLI/VSCode/ClaudeCode/Windsurf/Cursor...etc**: The official Gemini CLI, which can connect to the MCP server to answer questions about its documentation.
+## Install dependencies
 
-## Features
+The direct dependencies are pinned in `requirements.txt`. `requirements.lock` contains the resolved Linux CPU dependencies and distribution hashes.
 
--   **RAG-based Q&A**: Ask questions about the Gemini CLI in natural language and get answers based on its official documentation.
--   **Local Vector Store**: The entire documentation is stored and indexed locally using `SKLearnVectorStore`.
--   **Extensible**: The MCP server can be easily extended with new tools and data sources.
-
-## System Architecture
-
-The system is composed of the following parts:
-
-1.  **`extract.py`**: This script walks through the `gemini-cli/docs` directory, finds all `.md` files, and concatenates their content into a single `gemini_cli_docs.txt` file.
-2.  **`create_vectorstore.py`**: This script loads the `gemini_cli_docs.txt` file, splits it into chunks, and creates a `gemini_cli_vectorstore.parquet` file using `HuggingFaceEmbeddings` and `SKLearnVectorStore`.
-3.  **`gemini_cli_mcp.py`**: This script runs a `FastMCP` server that loads the vector store and exposes two endpoints:
-    -   `gemini_cli_query_tool(query: str)`: A tool that takes a user query, retrieves relevant documents from the vector store, and returns them.
-    -   `docs://gemini-cli/full`: A resource that returns the entire content of the `gemini_cli_docs.txt` file.
-4.  **`gemini-cli/`**: The official Gemini CLI, which can be configured to use the MCP server.
-
-## Getting Started
-
-### Prerequisites
-
--   Python 3.13
--   [Node.js 18+](https://nodejs.org/en/download) 
--   An existing `gemini-cli` installation. If you don't have it, you can clone the official repository:
-    ```bash
-    git clone https://github.com/google-gemini/gemini-cli.git
-    ```
-
-### Installation
-
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/your-username/gemini-cli-rag-mcp.git
-    cd gemini-cli-rag-mcp
-    ```
-
-2.  **Install Python dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-3.  **Prepare the documentation data:**
-    Run the `extract.py` script to gather all the markdown documentation into a single file.
-    ```bash
-    python extract.py
-    ```
-
-4.  **Create the vector store:**
-    Run the `create_vectorstore.py` script to create the vector store from the documentation file.
-    ```bash
-    python create_vectorstore.py
-    ```
-
-## Usage
-Before running with docker, try running the mcp in dev mode and test:
-```bash
-mcp dev gemini_cli_mcp.py
-``` 
-On ``Command`` field type 'python' and on ``Arguments`` type 'gemini_cli_mcp.py' and press Connect.
-
-### 1. Run the MCP Service with Docker
-
-The most efficient way to run the MCP server is with Docker Compose. This starts a container in the background and keeps it ready for Gemini CLI to connect to.
+With an activated Python environment:
 
 ```bash
-docker-compose up -d
+python -m pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
+python -m pip install --require-hashes -r requirements.lock
 ```
 
-The container will keep running, but the Python MCP script itself will only be executed on-demand by Gemini CLI.
+Alternatively, with uv and the existing Conda environment:
 
-### 2. Configure Gemini CLI
+```bash
+uv pip install --python "$CONDA_PREFIX/bin/python" --torch-backend cpu --require-hashes -r requirements.lock
+```
 
-To make Gemini CLI aware of your local MCP server, you need to create a configuration file.
+The CPU-specific lock was generated with:
 
--  Inside the `.gemini` directory add the following content to the `settings.json` file:
+```bash
+uv pip compile requirements.txt --python-version 3.11 --torch-backend cpu --exclude-newer 2026-09-15 --no-annotate --no-header --generate-hashes --output-file requirements.lock
+```
 
-    ```json
-    {
-      "mcpServers": {
-        "local_rag_server": {
-          "command": "docker",
-          "args": [
-            "exec",
-            "-i",
-            "gemini-cli-mcp-container",
-            "python",
-            "gemini_cli_mcp.py"
-          ]
-        }
+## Extract documentation
+
+Authenticate `gh` if needed, then choose an explicit stable tag:
+
+```bash
+python extract.py --ref v0.60.0 --output gemini_cli_documents-v0.60.0-r2.jsonl
+```
+
+The tag is resolved to a full commit before downloading. Moving branches and preview tags are rejected; an explicit full commit SHA is also accepted. Downloads are temporary and do not depend on the legacy `gemini-cli` submodule.
+
+The `r2` dataset includes MDX installation and authentication guides that were absent from the first Markdown-only extraction. The v0.60.0 corpus contains 84 source documents and 1,310 sections.
+
+For local input:
+
+```bash
+python extract.py --source-dir gemini-cli/docs --output gemini_cli_documents-local.jsonl
+```
+
+Local files are not assigned an unverified official revision or URL. Extraction and its tests use only the Python standard library.
+
+The initial corpus includes installation, authentication, configuration, commands, tools, MCP, extensions, hooks, skills, sandboxing, and troubleshooting. Contributor workflows, internal development documentation, translations, and changelogs are excluded. Markdown headings define sections while code examples, tables, and links remain in the text. Single-line MDX component imports are omitted; component labels and content are retained as text. MDX is not rendered or executed.
+
+Each JSONL row contains `id`, `page_content`, and `metadata`. Metadata includes the source file, heading hierarchy, line range, document/content hashes, collection timestamp, and official version/commit where verified. Existing output files are never overwritten. Missing or empty input and download errors exit nonzero.
+
+## Build a new index
+
+```bash
+python create_vectorstore.py --input gemini_cli_documents-v0.60.0-r2.jsonl --model e5-small
+```
+
+The default destination is `indexes/e5-small-v0.60.0`. To compare the previous embedding model on the same corpus:
+
+```bash
+python create_vectorstore.py --input gemini_cli_documents-v0.60.0-r2.jsonl --model bge-large-en --output indexes/bge-large-en-v0.60.0
+```
+
+An index directory contains:
+
+- `vectors.parquet`: normalized embeddings, chunk text, and source metadata.
+- `documents.jsonl`: the original extracted sections used to build this index.
+- `manifest.json`: model/revision, dimensions, query/document prefixes, chunking settings, source revisions, counts, and artifact checksums.
+
+Existing directories are never overwritten. A failed build may leave an incomplete directory without a manifest; use a new destination for a retry. The historical `gemini_cli_docs.txt` and `gemini_cli_vectorstore.parquet` are not modified or used by the new server.
+
+Chunking uses the selected model's tokenizer. The 512-token budget includes the section title, model-specific prefix, and special tokens. Long sections are divided with up to 40 tokens of overlap, preferring paragraph boundaries. Query and passage inputs that still exceed the model limit are rejected rather than silently truncated.
+
+E5 uses `query: ` and `passage: ` prefixes. BGE uses its recommended retrieval instruction for queries. Model weights are loaded with remote code disabled and safetensors enabled. Changing the model or its preprocessing requires a new index, even if the embedding dimensions happen to match.
+
+## Run the MCP server
+
+The client starts the server as a stdio subprocess. Do not allocate a TTY for the server process. Model and index loading is lazy and reused across queries in that process; diagnostics go to stderr, not protocol stdout.
+
+Settings:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `RAG_MODEL` | `e5-small` | Must match the index manifest. |
+| `RAG_INDEX_DIR` | `indexes/e5-small-v0.60.0`, relative to this repository | Directory containing the complete index bundle. |
+| `RAG_THREADS` | `4` | CPU thread count for PyTorch. |
+| `HF_HUB_OFFLINE` | unset | Set to `1` after caching the model to prevent Hugging Face network access. |
+
+For a client such as Gemini CLI, configure the appropriate `mcpServers` entry with absolute paths:
+
+```json
+{
+  "mcpServers": {
+    "gemini_docs": {
+      "command": "/absolute/path/to/python-environment/bin/python",
+      "args": ["/absolute/path/to/gemini-cli-rag-mcp/gemini_cli_mcp.py"],
+      "env": {
+        "RAG_MODEL": "e5-small",
+        "RAG_INDEX_DIR": "/absolute/path/to/gemini-cli-rag-mcp/indexes/e5-small-v0.60.0"
       }
     }
-    ```
+  }
+}
+```
 
-This configuration tells Gemini CLI how to launch your MCP server using `docker exec`.
-**Obs**: To use it in VSCode, go to `Settings` type 'mcp' and click on `settings.json`. Then put on Agent mode and ask copilot to implement the gemini-cli-mcp server (give the json above as context).
+The existing MCP interfaces are retained:
 
-### 3. Ask Questions
+- `gemini_cli_query_tool(query: str)`: returns three retrieved chunks, including source file, section, version, commit, URL, and cosine similarity. Similarity is not a confidence probability.
+- `docs://gemini-cli/full`: returns the extracted sections from the same index bundle, without loading embedding weights.
 
-After restarting terminal to changes make effect, simply run `gemini` from your terminal. It will automatically discover the `local_rag_server` and use its tools when needed.
+The manifest and artifact checksums are validated before an index is opened. Missing, corrupted, and incompatible indexes fail explicitly; the server never silently falls back to the historical index. Restart the MCP process after changing its index or model settings.
 
-**Example:**
-> How do I customize my gemini-cli?
+Retrieval always returns nearest passages for a nonempty valid query. There is no calibrated relevance threshold yet; the client should not assume every returned passage answers the question. The full resource can be large, so search is preferable for focused questions.
 
-or something more specific:
-> My gemini cli is not showing an interactive prompt when I run it on my build server, it just exits. I have a CI_TOKEN environment variable set. Why is this happening and how can I fix it?
+### Docker
 
-## How It Works
+Build the index on the host first, then:
 
-### Data Extraction and Vectorization
+```bash
+docker compose up -d --build
+```
 
-The `extract.py` script recursively finds all markdown files in the `gemini-cli/docs` directory. It reads their content and combines it into a single text file, `gemini_cli_docs.txt`.
+Compose mounts the E5 index read-only and provides a named Hugging Face model cache. No Anthropic or other LLM API key is needed. It refuses to create a missing host index directory automatically. The image excludes datasets, indexes, Git history, and dotenv files from its build context.
 
-The `create_vectorstore.py` script then takes this text file and:
-1.  Loads the document.
-2.  Splits it into smaller, overlapping chunks using `RecursiveCharacterTextSplitter`.
-3.  Uses `HuggingFaceEmbeddings` (with the `BAAI/bge-large-en-v1.5` model) to create embeddings for each chunk.
-4.  Stores these embeddings in a `SKLearnVectorStore`, which is persisted to `gemini_cli_vectorstore.parquet`.
+The existing on-demand `docker exec` workflow is preserved: Compose keeps a helper container alive, and the MCP client launches the server with:
 
-### MCP Server
+```json
+{
+  "mcpServers": {
+    "gemini_docs": {
+      "command": "docker",
+      "args": ["exec", "-i", "gemini-cli-mcp-container", "python", "gemini_cli_mcp.py"]
+    }
+  }
+}
+```
 
-The `gemini_cli_mcp.py` script creates a `FastMCP` server. This server defines a tool, `gemini_cli_query_tool`, which can be called by the Gemini CLI or VSCode/Cursor/etc. When this tool is invoked, it:
-1.  Loads the persisted `SKLearnVectorStore`.
-2.  Uses the vector store as a retriever to find the most relevant document chunks for the given query.
-3.  Returns the content of these chunks to the Gemini CLI.
+## Verification and model comparison
 
-### Gemini CLI Integration
+Offline unit tests, including mocked encoders and index round trips:
 
-The Gemini CLI is designed to be extensible through MCP servers. The CLI discovers available tools by connecting to servers defined in the `mcpServers` object in a `settings.json` file (either in the project's `.gemini` directory or in the user's home `~/.gemini` directory).
+```bash
+python -B -m unittest discover -v
+```
 
-Gemini CLI supports three transport mechanisms for communication:
+Using the existing environment, prefix Python commands with `conda run -n project_env`. After building the default index and caching its model, run the real MCP stdio test:
 
--   **Stdio Transport**: Spawns a subprocess and communicates with it over `stdin` and `stdout`. This is the method used in this project, with the `command` property in `settings.json`.
--   **SSE Transport**: Connects to a Server-Sent Events (SSE) endpoint, defined with a `url` property.
--   **Streamable HTTP Transport**: Uses HTTP streaming for communication, configured with an `httpUrl` property.
+```bash
+RUN_MCP_INTEGRATION=1 python -B -m unittest -v test_mcp.StdioIntegrationTests
+```
 
-By using the `docker exec` command, we are leveraging the `stdio` transport to create a direct communication channel with the Python script inside the container.
+The evaluation fixture contains 15 topics with paired Portuguese and English questions (30 queries). Evaluate each model separately, without another indexing job competing for the CPU:
 
-## Scripts
+```bash
+HF_HUB_OFFLINE=1 python evaluate_retrieval.py --index indexes/e5-small-v0.60.0 --model e5-small --output indexes/e5-small-v0.60.0/evaluation.json
+HF_HUB_OFFLINE=1 python evaluate_retrieval.py --index indexes/bge-large-en-v0.60.0 --model bge-large-en --output indexes/bge-large-en-v0.60.0/evaluation.json
+```
 
--   **`extract.py`**: Extracts documentation from markdown files.
--   **`create_vectorstore.py`**: Creates the vector store.
--   **`gemini_cli_mcp.py`**: Runs the MCP server.
+Evaluation checks coverage of every original section and the token budget of every chunk before querying. Reports include source hit rates at 1/3/5, source MRR at 5, warm query latency, model/index load time, and peak process RSS on Linux. It validates that every expected source exists in the selected corpus. Output reports are never overwritten.
 
-## Dependencies
-
-### Python
-
-The main Python dependencies are listed in `requirements.txt`:
--   `langchain`: For text splitting, vector stores, and embeddings.
--   `tiktoken`: For token counting.
--   `sentence-transformers`: For the embedding model.
--   `scikit-learn`: For the vector store.
--   `mcp`: For the MCP server.
--   `fastapi`: For the MCP server.
-
-### Node.js
-
-The project relies on the `gemini-cli` package and its dependencies. See `gemini-cli/package.json` for more details.
+This is a small, manually authored source-level smoke benchmark, not a held-out section-relevance benchmark or an evaluation of generated answers. BGE is evaluated with corrected preprocessing, not the original oversized-chunk pipeline. Model selection should account for these limitations, not just the headline score.
